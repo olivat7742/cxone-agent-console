@@ -1,173 +1,299 @@
 // agentClient.ts
 //
-// The ONLY module that should talk to the raw CXone Agent SDK.
-// Everything else in the app imports from here. This isolation means that when
-// you wire in the real SDK, you change this one file and nothing else breaks.
+// The ONLY module that talks to the CXone SDK. Everything else imports from
+// here. It drives the real SDK and writes results straight into the Zustand
+// stores, so components just read state and re-render.
 //
-// Right now it runs in MOCK_MODE: it pretends to be the CXone platform so you
-// can build and demo the UI before you have tenant credentials.
+// Real SDK surface used (confirmed from the @nice-devone type definitions):
+//   - CXoneAcdClient (acd-sdk): session, agent state, contacts
+//   - CXoneVoiceClient (voice-sdk): WebRTC audio + agent leg
+//   - CXoneClient (agent-sdk): agent settings / user details for WebRTC
 //
-// ---------------------------------------------------------------------------
-// HOW TO GO LIVE (later, once you have the real SDK + credentials):
-//   1. Set MOCK_MODE = false.
-//   2. Import the real CXone Agent SDK at the top.
-//   3. Replace the body of each method below with the real SDK call.
-//   4. In connect(), subscribe to the SDK's real-time events and forward them
-//      to the emit* helpers, exactly as the mock simulation does.
-// ---------------------------------------------------------------------------
+// MOCK_MODE keeps the old simulator available for UI demos without a session.
+// It is false now that the real integration is wired. The real paths cannot be
+// fully verified until a client_id exists (login works) and a real contact
+// routes to the agent, so treat the live behavior as "wired, pending live test".
 
-import type { AgentStateName, Contact, ContactChannel } from './types';
+import { CXoneAcdClient, CXoneVoiceContact } from '@nice-devone/acd-sdk';
+import { CXoneVoiceClient } from '@nice-devone/voice-sdk';
+import { CXoneClient } from '@nice-devone/agent-sdk';
+import { AgentSessionStatus } from '@nice-devone/common-sdk';
+import type { AgentState, AgentStateEvent, AgentSessionResponse } from '@nice-devone/common-sdk';
+import { useAgentStore } from '../store/agentStore';
+import { useContactStore } from '../store/contactStore';
+import type { AgentStateName, Contact, ContactChannel, ContactStatus } from './types';
 
-/** Flip to false when the real CXone Agent SDK is wired in. */
-export const MOCK_MODE = true;
+/** Set true to use the in-app simulator instead of the real SDK (UI demos). */
+export const MOCK_MODE = false;
 
-// --- Event subscription plumbing -------------------------------------------
-// The SDK pushes events at us (state changed, contact arrived). The UI wants to
-// react. We expose on*() functions that register listeners and return an
-// unsubscribe function. The store wires itself to these in ConsolePage.
+// --- Live contact instances (real mode) ------------------------------------
+// We keep the live CXoneVoiceContact objects so action methods can call their
+// own hold()/resume()/mute()/end() helpers.
+const liveContacts = new Map<string, CXoneVoiceContact>();
+let acdSubscribed = false;
 
-type StateListener = (state: AgentStateName) => void;
-type ContactListener = (contact: Contact) => void;
+// --- Mapping helpers --------------------------------------------------------
 
-const stateListeners = new Set<StateListener>();
-const contactOfferedListeners = new Set<ContactListener>();
-const contactUpdatedListeners = new Set<ContactListener>();
-
-function emitStateChange(state: AgentStateName) {
-  stateListeners.forEach((cb) => cb(state));
-}
-function emitContactOffered(contact: Contact) {
-  contactOfferedListeners.forEach((cb) => cb(contact));
-}
-function emitContactUpdated(contact: Contact) {
-  contactUpdatedListeners.forEach((cb) => cb(contact));
-}
-
-export function onStateChange(cb: StateListener): () => void {
-  stateListeners.add(cb);
-  return () => stateListeners.delete(cb);
-}
-export function onContactOffered(cb: ContactListener): () => void {
-  contactOfferedListeners.add(cb);
-  return () => contactOfferedListeners.delete(cb);
-}
-export function onContactUpdated(cb: ContactListener): () => void {
-  contactUpdatedListeners.add(cb);
-  return () => contactUpdatedListeners.delete(cb);
+function mapContactStatus(raw: string | undefined): ContactStatus {
+  const v = (raw ?? '').toLowerCase();
+  if (v.includes('hold')) return 'hold';
+  if (v.includes('disconnect') || v.includes('end') || v.includes('acw') || v.includes('complete')) {
+    return 'ended';
+  }
+  if (v.includes('active') || v.includes('connect') || v.includes('progress') || v.includes('answer')) {
+    return 'active';
+  }
+  return 'offered';
 }
 
-// --- Internal mock state ----------------------------------------------------
-
-let mockContactCounter = 0;
-const activeContacts = new Map<string, Contact>();
-
-function nowMs(): number {
-  return new Date().getTime();
+function mapVoiceContact(c: CXoneVoiceContact): Contact {
+  return {
+    id: c.contactID,
+    channel: 'voice',
+    status: mapContactStatus(c.status),
+    customerName: c.customerName || c.ani || c.dnis || 'Unknown caller',
+    customerDetail: c.ani || c.dnis || undefined,
+    skill: c.skillName || c.skill || undefined,
+    startedAt: c.startTime ? new Date(c.startTime).getTime() : new Date().getTime(),
+    muted: c.agentMuted,
+  };
 }
 
-// --- Public API the rest of the app uses ------------------------------------
+function mapAgentState(event: AgentStateEvent): AgentStateName | null {
+  const current = event?.currentState;
+  const cxoneState = (current?.cxoneState ?? '').toLowerCase();
+  if (cxoneState.includes('contact')) return 'OnContact';
+  const state = (current?.state ?? '').toLowerCase();
+  if (state.includes('unavailable')) return 'Unavailable';
+  if (state.includes('available')) return 'Available';
+  if (state.includes('working')) return 'Working';
+  return null;
+}
+
+// --- ACD event subscriptions (real mode) ------------------------------------
+
+function subscribeToAcdEvents(): void {
+  if (acdSubscribed) return;
+  acdSubscribed = true;
+
+  const acd = CXoneAcdClient.instance;
+
+  // Agent state changes -> agent store.
+  acd.agentStateService.agentStateSubject.subscribe((event: AgentStateEvent) => {
+    const name = mapAgentState(event);
+    if (name) useAgentStore.getState().setState(name);
+  });
+
+  // Voice contact lifecycle -> contact store.
+  acd.contactManager.voiceContactUpdateEvent.subscribe((c: CXoneVoiceContact) => {
+    liveContacts.set(c.contactID, c);
+    const mapped = mapVoiceContact(c);
+    const store = useContactStore.getState();
+    if (mapped.status === 'ended') {
+      store.removeContact(mapped.id);
+      liveContacts.delete(mapped.id);
+    } else {
+      store.upsertContact(mapped);
+    }
+  });
+
+  // Session lifecycle -> start WebRTC when the session is up.
+  acd.session.onAgentSessionChange.subscribe((res: AgentSessionResponse) => {
+    if (
+      res.status === AgentSessionStatus.JOIN_SESSION_SUCCESS ||
+      res.status === AgentSessionStatus.SESSION_START
+    ) {
+      void initWebRTC();
+    }
+  });
+
+  // Agent leg (voice path) -> hand off to the voice client.
+  acd.session.agentLegEvent.subscribe((leg) => {
+    CXoneVoiceClient.instance.handleAgentLegEvent(leg);
+    const legAny = leg as unknown as { status?: string; agentLegId?: string };
+    if (legAny.status === 'Dialing' && legAny.agentLegId) {
+      CXoneVoiceClient.instance.connectAgentLeg(legAny.agentLegId);
+    }
+  });
+}
+
+// --- WebRTC bootstrap (real mode) -------------------------------------------
+// Loosely typed on purpose: getAgentSettings()/getUserDetails() return unions
+// with error types, and connectServer wants a connection-options object. This
+// path needs a live session to verify; it is guarded so failures never crash.
+let audioEl: HTMLAudioElement | null = null;
+
+function getAudioElement(): HTMLAudioElement {
+  if (!audioEl) {
+    audioEl = document.createElement('audio');
+    audioEl.id = 'cxone-remote-audio';
+    audioEl.autoplay = true;
+    document.body.appendChild(audioEl);
+  }
+  return audioEl;
+}
+
+async function initWebRTC(): Promise<void> {
+  try {
+    const client = CXoneClient.instance as unknown as {
+      agentSetting: { getAgentSettings: () => Promise<unknown> };
+      cxoneUser: { getUserDetails: () => Promise<unknown> };
+    };
+    const agentSettings = await client.agentSetting.getAgentSettings();
+    const userInfo = (await client.cxoneUser.getUserDetails()) as { icAgentId?: string };
+    const acdAgentId = userInfo?.icAgentId;
+    if (!acdAgentId || !agentSettings) return;
+    CXoneVoiceClient.instance.connectServer(
+      String(acdAgentId),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      agentSettings as any,
+      getAudioElement(),
+      'CXone Agent Console',
+    );
+  } catch (e) {
+    console.warn('[agentClient] WebRTC connect failed (verify on live call):', e);
+  }
+}
+
+// --- Public API -------------------------------------------------------------
 
 /**
- * Connect / log the agent in.
- * REAL SDK: initialize the SDK session with the access token, then subscribe
- * to its real-time events and forward them to the emit* helpers above.
+ * Start the ACD session after authentication. Called from auth/login after the
+ * SDK auth modules are initialized. Safe to await; never throws.
  */
-export async function connect(token: string): Promise<void> {
+export async function initSession(): Promise<void> {
   if (MOCK_MODE) {
-    console.info('[agentClient] MOCK connect with token:', token.slice(0, 8) + '...');
-    // Simulate the platform putting the agent in Unavailable after login.
-    emitStateChange('Unavailable');
+    useAgentStore.getState().setState('Unavailable');
     return;
   }
-  // REAL: e.g. await cxoneSdk.init({ accessToken: token }); subscribe to events.
-  throw new Error('Real SDK not wired in yet. Set MOCK_MODE = false and implement.');
+  try {
+    await CXoneAcdClient.instance.initAcdEngagement();
+    subscribeToAcdEvents();
+    try {
+      await CXoneAcdClient.instance.session.joinSession();
+    } catch {
+      // No existing session to join; start a new WebRTC voice session.
+      await CXoneAcdClient.instance.session.startSession({
+        stationId: '',
+        stationPhoneNumber: 'WebRTC',
+      });
+    }
+  } catch (e) {
+    console.warn('[agentClient] initSession failed (verify after first login):', e);
+  }
 }
 
-/**
- * Change the agent's availability state.
- * REAL SDK: call the SDK's setAgentState / setStatus method.
- */
-export async function setState(state: AgentStateName, reasonCode?: string): Promise<void> {
+/** Change the agent's availability state. */
+export async function setState(state: AgentStateName, reason?: string): Promise<void> {
   if (MOCK_MODE) {
-    console.info('[agentClient] MOCK setState:', state, reasonCode ?? '');
-    emitStateChange(state);
+    useAgentStore.getState().setState(state);
     return;
   }
-  throw new Error('Real SDK not wired in yet.');
+  const payload: AgentState = { state, reason: reason ?? '' };
+  try {
+    await CXoneAcdClient.instance.agentStateService.setAgentState(payload);
+  } catch (e) {
+    console.warn('[agentClient] setState failed:', e);
+  }
 }
 
-/**
- * DEMO ONLY: simulate an inbound contact being offered to the agent.
- * Remove this when the real SDK is wired in. The real platform pushes contacts
- * to you via events; you never create them yourself.
- */
+/** Accept an offered contact. */
+export async function acceptContact(id: string): Promise<void> {
+  if (MOCK_MODE) return mockTransition(id, 'active');
+  try {
+    await CXoneAcdClient.instance.contactManager.contactService.acceptContact(id);
+  } catch (e) {
+    console.warn('[agentClient] acceptContact failed:', e);
+  }
+}
+
+/** Reject an offered contact. */
+export async function rejectContact(id: string): Promise<void> {
+  if (MOCK_MODE) return mockTransition(id, 'ended');
+  try {
+    await CXoneAcdClient.instance.contactManager.contactService.rejectContact(id);
+  } catch (e) {
+    console.warn('[agentClient] rejectContact failed:', e);
+  }
+}
+
+/** Put an active contact on hold. */
+export async function hold(id: string): Promise<void> {
+  if (MOCK_MODE) return mockTransition(id, 'hold');
+  await liveContacts.get(id)?.hold();
+}
+
+/** Resume a held contact. */
+export async function unhold(id: string): Promise<void> {
+  if (MOCK_MODE) return mockTransition(id, 'active');
+  await liveContacts.get(id)?.resume();
+}
+
+/** Toggle mute on a voice contact. */
+export async function toggleMute(id: string): Promise<void> {
+  if (MOCK_MODE) return mockToggleMute(id);
+  const c = liveContacts.get(id);
+  if (!c) return;
+  if (c.agentMuted) await c.unmute();
+  else await c.mute();
+}
+
+/** End / disconnect a contact. */
+export async function endContact(id: string): Promise<void> {
+  if (MOCK_MODE) return mockTransition(id, 'ended');
+  const c = liveContacts.get(id);
+  if (c) await c.end();
+  else await CXoneAcdClient.instance.contactManager.contactService.endContact(id);
+}
+
+// --- Mock simulator (MOCK_MODE only) ----------------------------------------
+
+let mockCounter = 0;
+const mockContacts = new Map<string, Contact>();
+
+/** DEMO ONLY: simulate an inbound contact. No-op unless MOCK_MODE. */
 export function simulateIncomingContact(channel: ContactChannel = 'voice'): void {
   if (!MOCK_MODE) return;
-  mockContactCounter += 1;
-  const sampleCustomers = [
+  mockCounter += 1;
+  const samples = [
     { name: 'Marie Dubois', detail: '+33 6 12 34 56 78', skill: 'Support FR' },
     { name: 'James Carter', detail: 'james.carter@example.com', skill: 'Billing EN' },
     { name: 'Sofia Rossi', detail: 'Order #48213', skill: 'Sales IT' },
   ];
-  const pick = sampleCustomers[mockContactCounter % sampleCustomers.length];
+  const pick = samples[mockCounter % samples.length];
   const contact: Contact = {
-    id: `mock-${mockContactCounter}`,
+    id: `mock-${mockCounter}`,
     channel,
     status: 'offered',
     customerName: pick.name,
     customerDetail: pick.detail,
     skill: pick.skill,
-    startedAt: nowMs(),
+    startedAt: new Date().getTime(),
   };
-  activeContacts.set(contact.id, contact);
-  emitContactOffered(contact);
+  mockContacts.set(contact.id, contact);
+  useContactStore.getState().upsertContact(contact);
 }
 
-/** Accept an offered contact. REAL SDK: call the accept method. */
-export async function acceptContact(id: string): Promise<void> {
-  const c = activeContacts.get(id);
+function mockTransition(id: string, status: ContactStatus): void {
+  const c = mockContacts.get(id);
   if (!c) return;
-  c.status = 'active';
-  emitContactUpdated({ ...c });
-  emitStateChange('OnContact');
+  const updated = { ...c, status };
+  mockContacts.set(id, updated);
+  const store = useContactStore.getState();
+  if (status === 'ended') {
+    store.removeContact(id);
+    mockContacts.delete(id);
+    useAgentStore.getState().setState('Available');
+  } else {
+    store.upsertContact(updated);
+    if (status === 'active') useAgentStore.getState().setState('OnContact');
+  }
 }
 
-/** Reject / decline an offered contact. */
-export async function rejectContact(id: string): Promise<void> {
-  endContact(id);
-}
-
-/** Put an active contact on hold. */
-export async function hold(id: string): Promise<void> {
-  const c = activeContacts.get(id);
+function mockToggleMute(id: string): void {
+  const c = mockContacts.get(id);
   if (!c) return;
-  c.status = 'hold';
-  emitContactUpdated({ ...c });
-}
-
-/** Resume a held contact. */
-export async function unhold(id: string): Promise<void> {
-  const c = activeContacts.get(id);
-  if (!c) return;
-  c.status = 'active';
-  emitContactUpdated({ ...c });
-}
-
-/** Toggle mute on a voice contact. */
-export async function toggleMute(id: string): Promise<void> {
-  const c = activeContacts.get(id);
-  if (!c) return;
-  c.muted = !c.muted;
-  emitContactUpdated({ ...c });
-}
-
-/** End / disconnect a contact. */
-export async function endContact(id: string): Promise<void> {
-  const c = activeContacts.get(id);
-  if (!c) return;
-  c.status = 'ended';
-  emitContactUpdated({ ...c });
-  activeContacts.delete(id);
-  // After wrap-up the platform usually returns the agent to Available.
-  emitStateChange('Available');
+  const updated = { ...c, muted: !c.muted };
+  mockContacts.set(id, updated);
+  useContactStore.getState().upsertContact(updated);
 }

@@ -17,6 +17,7 @@
 import { CXoneAuth } from '@nice-devone/auth-sdk';
 import { CXoneClient } from '@nice-devone/agent-sdk';
 import { getAuthConfig, isAuthConfigured } from './config';
+import { initSession } from '../sdk/agentClient';
 
 export interface SessionInfo {
   agentName: string;
@@ -49,6 +50,7 @@ export async function completeLogin(code: string): Promise<SessionInfo> {
   const { clientId } = getAuthConfig();
   await CXoneAuth.instance.getAccessTokenByCode({ clientId, code });
   await CXoneClient.instance.initAuthDependentModules();
+  await initSession();
   return { agentName: await resolveAgentName() };
 }
 
@@ -61,6 +63,7 @@ export async function restoreSession(): Promise<SessionInfo | null> {
     const state = CXoneAuth.instance.getAuthState();
     if (!state || CXoneAuth.instance.isTokenExpired()) return null;
     await CXoneClient.instance.initAuthDependentModules();
+    await initSession();
     return { agentName: await resolveAgentName() };
   } catch {
     return null;

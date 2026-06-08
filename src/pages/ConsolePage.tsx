@@ -1,21 +1,11 @@
 // ConsolePage.tsx
 //
-// The main agent console. It does two jobs:
-//   1. WIRING: on mount, it subscribes to the agent client's events and pushes
-//      updates into the Zustand stores. This is the bridge between the SDK
-//      layer and the UI. When you wire in the real SDK, this code does not
-//      change, because agentClient already normalizes everything.
-//   2. LAYOUT: state bar on top, contacts on the left, customer panel on right.
+// The main agent console. State and contacts now flow from the SDK straight
+// into the Zustand stores (see agentClient.ts), so this component just reads
+// the stores and renders. The simulator buttons appear only in MOCK_MODE.
 
 import { Box, Button, Divider, Paper, Stack, Typography } from '@mui/material';
-import { useEffect } from 'react';
-import {
-  onContactOffered,
-  onContactUpdated,
-  onStateChange,
-  simulateIncomingContact,
-} from '../sdk/agentClient';
-import { useAgentStore } from '../store/agentStore';
+import { MOCK_MODE, simulateIncomingContact } from '../sdk/agentClient';
 import { useContactStore } from '../store/contactStore';
 import { StateBar } from '../components/StateBar';
 import { ContactCard } from '../components/ContactCard';
@@ -23,32 +13,7 @@ import { CallControls } from '../components/CallControls';
 import { CustomerPanel } from '../components/CustomerPanel';
 
 export function ConsolePage() {
-  const setAgentState = useAgentStore((s) => s.setState);
   const contacts = useContactStore((s) => s.contacts);
-  const upsertContact = useContactStore((s) => s.upsertContact);
-  const removeContact = useContactStore((s) => s.removeContact);
-
-  // Subscribe to SDK events once, on mount. Each on*() returns an unsubscribe
-  // function, which we return from useEffect so React cleans up on unmount.
-  useEffect(() => {
-    const unsubState = onStateChange((state) => setAgentState(state));
-
-    const unsubOffered = onContactOffered((contact) => upsertContact(contact));
-
-    const unsubUpdated = onContactUpdated((contact) => {
-      if (contact.status === 'ended') {
-        removeContact(contact.id);
-      } else {
-        upsertContact(contact);
-      }
-    });
-
-    return () => {
-      unsubState();
-      unsubOffered();
-      unsubUpdated();
-    };
-  }, [setAgentState, upsertContact, removeContact]);
 
   const offered = contacts.filter((c) => c.status === 'offered');
   const active = contacts.filter((c) => c.status === 'active' || c.status === 'hold');
@@ -60,15 +25,16 @@ export function ConsolePage() {
       <Box sx={{ display: 'flex', gap: 2, p: 2, alignItems: 'flex-start' }}>
         {/* Left column: contacts */}
         <Stack spacing={2} sx={{ flex: 2 }}>
-          {/* DEMO control. Remove when the real SDK pushes real contacts. */}
-          <Stack direction="row" spacing={1}>
-            <Button variant="contained" onClick={() => simulateIncomingContact('voice')}>
-              Simulate voice contact
-            </Button>
-            <Button variant="outlined" onClick={() => simulateIncomingContact('chat')}>
-              Simulate chat
-            </Button>
-          </Stack>
+          {MOCK_MODE && (
+            <Stack direction="row" spacing={1}>
+              <Button variant="contained" onClick={() => simulateIncomingContact('voice')}>
+                Simulate voice contact
+              </Button>
+              <Button variant="outlined" onClick={() => simulateIncomingContact('chat')}>
+                Simulate chat
+              </Button>
+            </Stack>
+          )}
 
           {offered.map((c) => (
             <ContactCard key={c.id} contact={c} />
@@ -88,7 +54,7 @@ export function ConsolePage() {
 
           {contacts.length === 0 && (
             <Typography color="text.secondary">
-              No active contacts. Set yourself Available and simulate a contact.
+              No active contacts. Set yourself Available to receive contacts.
             </Typography>
           )}
         </Stack>
