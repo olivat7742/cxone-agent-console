@@ -5,6 +5,7 @@
 import { Box, Button, Chip, MenuItem, Select, Stack, Typography } from '@mui/material';
 import { useAgentStore } from '../store/agentStore';
 import { setState } from '../sdk/agentClient';
+import { logout } from '../auth/login';
 import { UNAVAILABLE_REASONS } from '../sdk/types';
 import { useState } from 'react';
 
@@ -66,6 +67,9 @@ export function StateBar() {
           disabled={state === 'OnContact'}
         >
           Unavailable
+        </Button>
+        <Button variant="text" color="inherit" onClick={() => logout()}>
+          Log out
         </Button>
       </Stack>
     </Box>
