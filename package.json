@@ -13,9 +13,11 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^9.1.0",
+    "@nice-devone/agent-sdk": "^26.2.1",
     "axios": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "yup": "^1.7.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

@@ -1,36 +1,27 @@
 // LoginPage.tsx
 //
-// Simple login form. On submit it runs the (mock) auth flow, connects the
-// agent client, and flips the global "connected" flag, which causes App to
-// render the console.
+// Real CXone login. Clicking the button redirects the agent to NiCE's hosted
+// login page (OIDC + PKCE). If the .env config is missing, it shows setup
+// instructions instead of a dead button.
 
-import { Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Stack, Typography } from '@mui/material';
 import { useState } from 'react';
-import { login } from '../auth/login';
-import { connect } from '../sdk/agentClient';
-import { useAgentStore } from '../store/agentStore';
+import { startLogin } from '../auth/login';
+import { getMissingConfigKeys } from '../auth/config';
 
 export function LoginPage() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const missing = getMissingConfigKeys();
+  const configured = missing.length === 0;
 
-  const setConnected = useAgentStore((s) => s.setConnected);
-  const setAgentName = useAgentStore((s) => s.setAgentName);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleLogin() {
     setBusy(true);
     setError(null);
     try {
-      const result = await login(username, password);
-      await connect(result.token);
-      setAgentName(result.agentName);
-      setConnected(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
-    } finally {
+      await startLogin(); // redirects away on success
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start login');
       setBusy(false);
     }
   }
@@ -45,39 +36,43 @@ export function LoginPage() {
         bgcolor: 'background.default',
       }}
     >
-      <Card sx={{ width: 360 }}>
+      <Card sx={{ width: 420 }}>
         <CardContent>
           <Typography variant="h5" gutterBottom>
             CXone Agent Console
           </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Mock mode. Enter any username to continue.
-          </Typography>
-          <form onSubmit={handleSubmit}>
+
+          {configured ? (
             <Stack spacing={2} sx={{ mt: 1 }}>
-              <TextField
-                label="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoFocus
-                required
-              />
-              <TextField
-                label="Password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              {error && (
-                <Typography color="error" variant="body2">
-                  {error}
-                </Typography>
-              )}
-              <Button type="submit" variant="contained" disabled={busy}>
-                {busy ? 'Connecting...' : 'Log in'}
+              <Typography variant="body2" color="text.secondary">
+                Sign in with your CXone account to start handling contacts.
+              </Typography>
+              {error && <Alert severity="error">{error}</Alert>}
+              <Button variant="contained" size="large" disabled={busy} onClick={handleLogin}>
+                {busy ? 'Redirecting...' : 'Log in with CXone'}
               </Button>
             </Stack>
-          </form>
+          ) : (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Alert severity="warning">
+                CXone authentication is not configured yet.
+              </Alert>
+              <Typography variant="body2" color="text.secondary">
+                Create a <code>.env</code> file (copy <code>.env.example</code>) and set the
+                following from your CXone app registration:
+              </Typography>
+              <Box component="ul" sx={{ m: 0, pl: 3 }}>
+                {missing.map((k) => (
+                  <li key={k}>
+                    <code>{k}</code>
+                  </li>
+                ))}
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                Restart the dev server after editing .env.
+              </Typography>
+            </Stack>
+          )}
         </CardContent>
       </Card>
     </Box>
