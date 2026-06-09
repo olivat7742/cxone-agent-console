@@ -32,6 +32,22 @@ export interface TagOption {
   name: string;
 }
 
+/** A single message in a digital conversation thread. */
+export interface DigitalMessage {
+  id: string;
+  direction: string; // 'inbound' | 'outbound'
+  text: string;
+}
+
+/** A digital contact (chat/email/social) with its message thread. */
+export interface DigitalContactView {
+  caseId: string;
+  channel: string;
+  customerName: string;
+  status: string;
+  messages: DigitalMessage[];
+}
+
 /** A single customer interaction (call, chat, email, etc.). */
 export interface Contact {
   id: string;

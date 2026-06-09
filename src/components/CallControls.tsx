@@ -21,12 +21,14 @@ export function CallControls({ contact }: { contact: Contact }) {
           {contact.muted ? 'Unmute' : 'Mute'}
         </Button>
       )}
-      <Button
-        variant={onHold ? 'contained' : 'outlined'}
-        onClick={() => (onHold ? unhold(contact.id) : hold(contact.id))}
-      >
-        {onHold ? 'Resume' : 'Hold'}
-      </Button>
+      {isVoice && (
+        <Button
+          variant={onHold ? 'contained' : 'outlined'}
+          onClick={() => (onHold ? unhold(contact.id) : hold(contact.id))}
+        >
+          {onHold ? 'Resume' : 'Hold'}
+        </Button>
+      )}
       <Button variant="outlined" disabled>
         Transfer
       </Button>

@@ -14,8 +14,9 @@
 // fully verified until a client_id exists (login works) and a real contact
 // routes to the agent, so treat the live behavior as "wired, pending live test".
 
-import { CXoneAcdClient, CXoneVoiceContact } from '@nice-devone/acd-sdk';
+import { CXoneAcdClient, CXoneVoiceContact, CXoneWorkItemContact } from '@nice-devone/acd-sdk';
 import { CXoneVoiceClient } from '@nice-devone/voice-sdk';
+import { CXoneDigitalClient, CXoneDigitalContact } from '@nice-devone/digital-sdk';
 import { CXoneClient } from '@nice-devone/agent-sdk';
 import { AgentSessionStatus } from '@nice-devone/common-sdk';
 import type {
@@ -27,10 +28,19 @@ import type {
   TagsResponse,
   CXoneDispositionDetails,
 } from '@nice-devone/common-sdk';
+import type { CXoneDigitalReplyRequest } from '@nice-devone/common-sdk';
 import { useAgentStore } from '../store/agentStore';
 import { useContactStore } from '../store/contactStore';
 import { useOutcomeStore } from '../store/outcomeStore';
-import type { AgentStateName, Contact, ContactChannel, ContactStatus } from './types';
+import { useDigitalStore } from '../store/digitalStore';
+import type {
+  AgentStateName,
+  Contact,
+  ContactChannel,
+  ContactStatus,
+  DigitalContactView,
+  DigitalMessage,
+} from './types';
 
 /** Set true to use the in-app simulator instead of the real SDK (UI demos). */
 export const MOCK_MODE = false;
@@ -43,6 +53,9 @@ let acdSubscribed = false;
 let sessionInitStarted = false;
 // Raw tag objects for the current contact, kept so saveTags can send full CXoneTag payloads.
 let rawTags: CXoneTag[] = [];
+// Live digital contact instances, kept so we can reply()/changeStatus() on them.
+const liveDigital = new Map<string, CXoneDigitalContact>();
+let digitalSubscribed = false;
 
 // --- Mapping helpers --------------------------------------------------------
 
@@ -73,6 +86,80 @@ function mapVoiceContact(c: CXoneVoiceContact): Contact {
     requiresAccept: c.isRequireManualAccept === true,
     allowDispositions: c.allowDispositions,
     requiresDisposition: c.requireDisposition,
+  };
+}
+
+function mapWorkItemContact(c: CXoneWorkItemContact): Contact {
+  // CXoneWorkItemContact extends the base contact; fields are accessed
+  // defensively since work items carry fewer voice-specific properties.
+  const w = c as unknown as {
+    contactID: string;
+    status?: string;
+    skill?: string;
+    skillName?: string;
+    customerName?: string;
+    startTime?: Date;
+    isRequireManualAccept?: boolean;
+    allowDispositions?: boolean;
+    requireDisposition?: boolean;
+  };
+  return {
+    id: w.contactID,
+    channel: 'work_item',
+    status: mapContactStatus(w.status),
+    customerName: w.customerName || w.skillName || 'Work item',
+    skill: w.skillName || w.skill || undefined,
+    startedAt: w.startTime ? new Date(w.startTime).getTime() : new Date().getTime(),
+    requiresAccept: w.isRequireManualAccept === true,
+    allowDispositions: w.allowDispositions,
+    requiresDisposition: w.requireDisposition,
+  };
+}
+
+// Shared lifecycle handling for ACD contacts (voice + work item).
+function applyAcdContactUpdate(mapped: Contact): void {
+  const store = useContactStore.getState();
+  if (mapped.status === 'ended') {
+    const alreadySaved = useOutcomeStore.getState().savedContactIds.includes(mapped.id);
+    if (mapped.allowDispositions && !alreadySaved) {
+      store.upsertContact({ ...mapped, status: 'wrapup' });
+    } else {
+      store.removeContact(mapped.id);
+    }
+  } else {
+    store.upsertContact(mapped);
+  }
+}
+
+// --- Digital mapping helpers ------------------------------------------------
+
+function mapDigitalMessages(messages: unknown): DigitalMessage[] {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((m, i) => {
+    const msg = m as { id?: string; messageId?: string; direction?: string; messageContent?: { text?: string } };
+    return {
+      id: msg.id || msg.messageId || String(i),
+      direction: msg.direction || 'inbound',
+      text: msg.messageContent?.text || '',
+    };
+  });
+}
+
+function mapDigitalContact(c: CXoneDigitalContact): DigitalContactView {
+  const d = c as unknown as {
+    caseId: string;
+    customerName?: string;
+    channelType?: string;
+    channel?: { name?: string };
+    status?: unknown;
+    messages?: unknown;
+  };
+  return {
+    caseId: d.caseId,
+    channel: d.channelType || d.channel?.name || 'digital',
+    customerName: d.customerName || 'Customer',
+    status: String(d.status ?? ''),
+    messages: mapDigitalMessages(d.messages),
   };
 }
 
@@ -135,22 +222,15 @@ function subscribeToAcdEvents(): void {
     });
     liveContacts.set(c.contactID, c);
     const mapped = mapVoiceContact(c);
-    const store = useContactStore.getState();
-    if (mapped.status === 'ended') {
-      const alreadySaved = useOutcomeStore.getState().savedContactIds.includes(mapped.id);
-      if (mapped.allowDispositions && !alreadySaved) {
-        // Call disconnected but dispositions are allowed and not yet saved:
-        // keep it in wrap-up (ACW) so the agent can disposition. The SDK
-        // re-publishes 'Disconnected' repeatedly during ACW, so once saved we
-        // must stop re-adding it (handled by the alreadySaved guard).
-        store.upsertContact({ ...mapped, status: 'wrapup' });
-      } else {
-        store.removeContact(mapped.id);
-      }
-      liveContacts.delete(mapped.id);
-    } else {
-      store.upsertContact(mapped);
-    }
+    applyAcdContactUpdate(mapped);
+    if (mapped.status === 'ended') liveContacts.delete(mapped.id);
+  });
+
+  // Work item contact lifecycle -> contact store (same lifecycle as voice).
+  acd.contactManager.workItemContactUpdateEvent.subscribe((c: CXoneWorkItemContact) => {
+    const mapped = mapWorkItemContact(c);
+    console.info('[CXone] workItemContactUpdate', { id: mapped.id, status: mapped.status });
+    applyAcdContactUpdate(mapped);
   });
 
   // Available dispositions for the current contact -> outcome store.
@@ -253,6 +333,74 @@ async function initWebRTC(): Promise<void> {
 
 // --- Public API -------------------------------------------------------------
 
+// --- Digital (messaging) ----------------------------------------------------
+
+function subscribeDigitalEvents(): void {
+  if (digitalSubscribed) return;
+  digitalSubscribed = true;
+  const dm = CXoneDigitalClient.instance.digitalContactManager;
+
+  // A digital contact arrived or was updated (includes its message thread).
+  dm.onDigitalContactEvent.subscribe((c: CXoneDigitalContact) => {
+    const view = mapDigitalContact(c);
+    console.info('[CXone] digitalContact', { caseId: view.caseId, channel: view.channel, msgs: view.messages.length });
+    liveDigital.set(view.caseId, c);
+    useDigitalStore.getState().upsertContact(view);
+  });
+
+  // A new message on a case -> refresh that case's thread from the live contact.
+  dm.onDigitalContactNewMessageEvent.subscribe((evt: unknown) => {
+    const e = evt as { caseId?: string; contactId?: string };
+    const caseId = e?.caseId || e?.contactId;
+    console.info('[CXone] digitalNewMessage', caseId);
+    if (!caseId) return;
+    const live = liveDigital.get(String(caseId));
+    if (live) {
+      const msgs = mapDigitalMessages((live as unknown as { messages?: unknown }).messages);
+      useDigitalStore.getState().setMessages(String(caseId), msgs);
+    }
+  });
+}
+
+/** Initialize digital engagement and subscribe to digital events. Never throws. */
+export async function initDigital(): Promise<void> {
+  if (MOCK_MODE) return;
+  try {
+    console.info('[CXone] initDigital: initDigitalEngagement...');
+    await CXoneDigitalClient.instance.initDigitalEngagement();
+    subscribeDigitalEvents();
+    console.info('[CXone] initDigital: ready');
+  } catch (e) {
+    console.warn('[agentClient] initDigital failed (verify on first digital contact):', e);
+  }
+}
+
+/** Send a reply on a digital contact. */
+export async function sendDigitalReply(caseId: string, text: string): Promise<void> {
+  const contact = liveDigital.get(caseId);
+  if (!contact) return;
+  const c = contact as unknown as {
+    channel?: { id?: string };
+    case?: { threadIdOnExternalPlatform?: string };
+    reply: (req: CXoneDigitalReplyRequest, channelId: string, traceId: string) => Promise<unknown>;
+  };
+  const request = {
+    messageContent: { text },
+    thread: { idOnExternalPlatform: c.case?.threadIdOnExternalPlatform },
+    recipients: [],
+  } as unknown as CXoneDigitalReplyRequest;
+  await c.reply(request, c.channel?.id ?? '', crypto.randomUUID());
+}
+
+/** Resolve / close a digital contact. */
+export async function resolveDigitalContact(caseId: string): Promise<void> {
+  const contact = liveDigital.get(caseId);
+  if (!contact) return;
+  await (contact as unknown as { changeStatus: (s: string) => Promise<unknown> }).changeStatus('resolved');
+  liveDigital.delete(caseId);
+  useDigitalStore.getState().removeContact(caseId);
+}
+
 /**
  * Start the ACD session after authentication. Called from auth/login after the
  * SDK auth modules are initialized. Safe to await; never throws.
@@ -285,6 +433,8 @@ export async function initSession(): Promise<void> {
     }
     // Load the team's unavailable reason codes for the state dropdown.
     void loadUnavailableCodes();
+    // Initialize digital engagement (chat/email/social) in parallel.
+    void initDigital();
   } catch (e) {
     sessionInitStarted = false; // allow a retry on next login attempt
     console.warn('[agentClient] initSession failed (verify after first login):', e);

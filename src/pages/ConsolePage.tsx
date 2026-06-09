@@ -12,6 +12,7 @@ import { ContactCard } from '../components/ContactCard';
 import { CallControls } from '../components/CallControls';
 import { CustomerPanel } from '../components/CustomerPanel';
 import { OutcomePanel } from '../components/OutcomePanel';
+import { DigitalPanel } from '../components/DigitalPanel';
 
 export function ConsolePage() {
   const contacts = useContactStore((s) => s.contacts);
@@ -92,6 +93,11 @@ export function ConsolePage() {
             </Paper>
           )}
         </Stack>
+      </Box>
+
+      {/* Digital (messaging) contacts: full-width section below the voice area */}
+      <Box sx={{ px: 2, pb: 2 }}>
+        <DigitalPanel />
       </Box>
     </Box>
   );
