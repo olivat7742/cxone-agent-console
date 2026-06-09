@@ -61,12 +61,9 @@ let acdSubscribed = false;
 let sessionInitStarted = false;
 // Raw tag objects for the current contact, kept so saveTags can send full CXoneTag payloads.
 let rawTags: CXoneTag[] = [];
-// Live digital contact instances, kept so we can reply()/changeStatus() on them.
+// Live digital contact instances, kept so we can changeStatus() on them.
 const liveDigital = new Map<string, CXoneDigitalContact>();
 let digitalSubscribed = false;
-// Cases we've already asked the SDK to hydrate (getContactDetails), so a bare
-// contact event does not trigger repeated fetches.
-const digitalHydrationRequested = new Set<string>();
 
 // --- Mapping helpers --------------------------------------------------------
 
@@ -351,57 +348,61 @@ function subscribeDigitalEvents(): void {
   digitalSubscribed = true;
   const dm = CXoneDigitalClient.instance.digitalContactManager;
 
-  // A digital contact arrived or was updated (includes its message thread).
+  // A digital contact arrived or was updated. The event-published contact is
+  // often "bare" (no channel/thread/messages), so we render what we have for the
+  // contact list and pull the authoritative thread from the DFO detail endpoint.
   dm.onDigitalContactEvent.subscribe((c: CXoneDigitalContact) => {
     const view = mapDigitalContact(c);
-    const enriched = c as unknown as {
-      channel?: { id?: string };
-      replyChannels?: unknown;
-      case?: { threadIdOnExternalPlatform?: string };
-    };
-    const hasChannelId = Boolean(enriched.channel?.id);
-    // onDigitalContactEvent fires first with a bare contact, then again enriched
-    // with channel/case/messages. We keep the latest instance for replying.
-    // TEMP DIAGNOSTIC (content-free): confirm whether the enriched event arrives.
-    console.info('[CXone] digital contact event', {
-      caseId: view.caseId,
-      channel: view.channel,
-      status: view.status,
-      msgs: view.messages.length,
-      hasChannelId,
-      hasReplyChannels: Array.isArray(enriched.replyChannels) && enriched.replyChannels.length > 0,
-      hasThread: Boolean(enriched.case?.threadIdOnExternalPlatform),
-    });
     liveDigital.set(view.caseId, c);
     useDigitalStore.getState().upsertContact(view);
-
-    // If the contact is bare (no channel id, so we can't reply), ask the SDK to
-    // fetch the full details. Per the SDK docs this "gets digital contact
-    // details, publishes it and subscribes to the event hub", which should
-    // re-fire this event enriched. Guarded so it runs at most once per case.
-    if (!hasChannelId && !digitalHydrationRequested.has(view.caseId)) {
-      digitalHydrationRequested.add(view.caseId);
-      console.info('[CXone] digital contact is bare, requesting full details for', view.caseId);
-      try {
-        dm.getContactDetails(view.caseId, true);
-      } catch (e) {
-        console.warn('[CXone] getContactDetails failed:', e);
-      }
-    }
+    void refreshDigitalMessages(view.caseId);
   });
 
-  // A new message on a case -> refresh that case's thread from the live contact.
+  // A new message on a case -> refresh that case's thread from the DFO detail
+  // (the bare live contact instance does not carry the messages).
   dm.onDigitalContactNewMessageEvent.subscribe((evt: unknown) => {
     const e = evt as { caseId?: string; contactId?: string };
     const caseId = e?.caseId || e?.contactId;
     debugLog('[CXone] digitalNewMessage', caseId);
     if (!caseId) return;
-    const live = liveDigital.get(String(caseId));
-    if (live) {
-      const msgs = mapDigitalMessages((live as unknown as { messages?: unknown }).messages);
-      useDigitalStore.getState().setMessages(String(caseId), msgs);
-    }
+    void refreshDigitalMessages(String(caseId));
   });
+}
+
+/**
+ * Shape of the DFO `/dfo/3.0/contacts/{caseId}/detail` payload we rely on.
+ * Verified against the live response: channel.id and thread.idOnExternalPlatform
+ * are what the outbound reply needs, and messages[] feeds the thread view.
+ */
+interface DigitalDetail {
+  channel?: { id?: string };
+  thread?: { idOnExternalPlatform?: string };
+  messages?: unknown;
+}
+
+/**
+ * Fetch the full DFO case detail. The contact published via onDigitalContactEvent
+ * can be bare, so this REST detail (the same endpoint the SDK uses internally) is
+ * our source of truth for channel id, thread and messages. Never throws.
+ */
+async function fetchDigitalDetail(caseId: string): Promise<DigitalDetail | null> {
+  try {
+    const svc = CXoneDigitalClient.instance.digitalContactManager.digitalContactService;
+    const resp = await svc.getDigitalContactDetails(caseId);
+    // HttpResponse exposes a `data` getter that parses the JSON body.
+    const data = (resp as unknown as { data?: DigitalDetail }).data;
+    return data ?? null;
+  } catch (e) {
+    console.warn('[CXone] getDigitalContactDetails failed:', e);
+    return null;
+  }
+}
+
+/** Refresh a case's message thread in the store from the DFO detail. */
+async function refreshDigitalMessages(caseId: string): Promise<void> {
+  const detail = await fetchDigitalDetail(caseId);
+  if (!detail) return;
+  useDigitalStore.getState().setMessages(caseId, mapDigitalMessages(detail.messages));
 }
 
 /** Initialize digital engagement and subscribe to digital events. Never throws. */
@@ -418,57 +419,27 @@ export async function initDigital(): Promise<void> {
 }
 
 /**
- * Resolve the channel id needed to reply. The enriched contact normally exposes
- * it as channel.id, but on some digital events that value arrives late or empty.
- * The contact also carries a replyChannels[] array whose channelId is, per the
- * SDK types, the "channel id from contact response", so we fall back to it.
+ * Send a reply on a digital contact. We fetch the DFO case detail to get the
+ * channel id and thread (the event-published contact can be bare), then post the
+ * outbound reply directly via the digital contact service.
  */
-function resolveDigitalChannelId(contact: CXoneDigitalContact): string | undefined {
-  const c = contact as unknown as {
-    channel?: { id?: string };
-    replyChannels?: Array<{ id?: string; channelId?: string }>;
-  };
-  return (
-    c.channel?.id ||
-    c.replyChannels?.find((rc) => rc.channelId)?.channelId ||
-    c.replyChannels?.find((rc) => rc.id)?.id ||
-    undefined
-  );
-}
-
-/** Send a reply on a digital contact. */
 export async function sendDigitalReply(caseId: string, text: string): Promise<void> {
-  const contact = liveDigital.get(caseId);
-  if (!contact) return;
-  const channelId = resolveDigitalChannelId(contact);
-  // TEMP DIAGNOSTIC (safe: channel config only, no customer message content).
-  // Remove once digital reply is confirmed working on the hosted site.
-  const dbg = contact as unknown as {
-    channel?: { id?: string };
-    replyChannels?: unknown;
-    case?: { threadIdOnExternalPlatform?: string };
-  };
-  console.info('[CXone] digital reply attempt', {
-    caseId,
-    resolvedChannelId: channelId,
-    channelDotId: dbg.channel?.id,
-    replyChannels: dbg.replyChannels,
-    hasThread: Boolean(dbg.case?.threadIdOnExternalPlatform),
-  });
+  const detail = await fetchDigitalDetail(caseId);
+  const channelId = detail?.channel?.id;
+  const threadIdOnExternalPlatform = detail?.thread?.idOnExternalPlatform;
   if (!channelId) {
     throw new Error('Conversation is still loading; try again in a moment.');
   }
-  const c = contact as unknown as {
-    case?: { threadIdOnExternalPlatform?: string };
-    reply: (req: CXoneDigitalReplyRequest, channelId: string, traceId: string) => Promise<unknown>;
-  };
   // messageContent shape per the SDK: { type: 'TEXT', payload: { text } }.
   const request = {
     messageContent: { type: 'TEXT', payload: { text } },
-    thread: { idOnExternalPlatform: c.case?.threadIdOnExternalPlatform },
+    thread: { idOnExternalPlatform: threadIdOnExternalPlatform },
     recipients: [],
   } as unknown as CXoneDigitalReplyRequest;
-  await c.reply(request, channelId, crypto.randomUUID());
+  const svc = CXoneDigitalClient.instance.digitalContactManager.digitalContactService;
+  await svc.postOutboundReply(request, channelId, crypto.randomUUID());
+  // Reflect the just-sent message in the thread without waiting for an event.
+  void refreshDigitalMessages(caseId);
 }
 
 /** Resolve / close a digital contact. */
