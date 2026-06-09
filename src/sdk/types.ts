@@ -32,6 +32,12 @@ export interface Contact {
   startedAt: number;
   /** True when the agent has muted their mic (voice only). */
   muted?: boolean;
+  /**
+   * Whether the agent must manually accept this contact. When false, the
+   * contact auto-answers (the platform connects it automatically) and the
+   * Accept button must NOT be shown, calling accept would be a 409 conflict.
+   */
+  requiresAccept?: boolean;
 }
 
 /** Reason codes shown when an agent goes Unavailable. */

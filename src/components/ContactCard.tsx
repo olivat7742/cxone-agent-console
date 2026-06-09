@@ -33,14 +33,22 @@ export function ContactCard({ contact }: { contact: Contact }) {
         )}
       </CardContent>
       <CardActions>
-        <Stack direction="row" spacing={1}>
-          <Button variant="contained" color="success" onClick={() => acceptContact(contact.id)}>
-            Accept
-          </Button>
-          <Button variant="outlined" color="error" onClick={() => rejectContact(contact.id)}>
-            Reject
-          </Button>
-        </Stack>
+        {contact.requiresAccept ? (
+          <Stack direction="row" spacing={1}>
+            <Button variant="contained" color="success" onClick={() => acceptContact(contact.id)}>
+              Accept
+            </Button>
+            <Button variant="outlined" color="error" onClick={() => rejectContact(contact.id)}>
+              Reject
+            </Button>
+          </Stack>
+        ) : (
+          // Auto-answer contact: the platform connects it automatically. No
+          // Accept button (calling accept would 409). It moves to Active shortly.
+          <Typography variant="body2" color="text.secondary">
+            Connecting automatically...
+          </Typography>
+        )}
       </CardActions>
     </Card>
   );

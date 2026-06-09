@@ -31,6 +31,7 @@ export const MOCK_MODE = false;
 // own hold()/resume()/mute()/end() helpers.
 const liveContacts = new Map<string, CXoneVoiceContact>();
 let acdSubscribed = false;
+let sessionInitStarted = false;
 
 // --- Mapping helpers --------------------------------------------------------
 
@@ -56,6 +57,9 @@ function mapVoiceContact(c: CXoneVoiceContact): Contact {
     skill: c.skillName || c.skill || undefined,
     startedAt: c.startTime ? new Date(c.startTime).getTime() : new Date().getTime(),
     muted: c.agentMuted,
+    // Only require manual accept when the flag is explicitly true. Voice
+    // contacts here report false (auto-answer), so we must not show Accept.
+    requiresAccept: c.isRequireManualAccept === true,
   };
 }
 
@@ -80,6 +84,11 @@ function subscribeToAcdEvents(): void {
 
   // Agent state changes -> agent store.
   acd.agentStateService.agentStateSubject.subscribe((event: AgentStateEvent) => {
+    console.info('[CXone] agentState', {
+      state: event?.currentState?.state,
+      cxoneState: event?.currentState?.cxoneState,
+      reason: event?.currentState?.reason,
+    });
     const name = mapAgentState(event);
     if (name) useAgentStore.getState().setState(name);
   });
@@ -88,9 +97,10 @@ function subscribeToAcdEvents(): void {
   acd.contactManager.voiceContactUpdateEvent.subscribe((c: CXoneVoiceContact) => {
     // DIAGNOSTIC (temporary): logs raw contact fields so we can verify the
     // status mapping against real CXone values on the first live call.
-    console.debug('[CXone] voiceContactUpdate', {
+    console.info('[CXone] voiceContactUpdate', {
       contactID: c.contactID,
       status: c.status,
+      isRequireManualAccept: c.isRequireManualAccept,
       customerName: c.customerName,
       ani: c.ani,
       dnis: c.dnis,
@@ -111,6 +121,7 @@ function subscribeToAcdEvents(): void {
 
   // Session lifecycle -> start WebRTC when the session is up.
   acd.session.onAgentSessionChange.subscribe((res: AgentSessionResponse) => {
+    console.info('[CXone] sessionChange', res.status);
     if (
       res.status === AgentSessionStatus.JOIN_SESSION_SUCCESS ||
       res.status === AgentSessionStatus.SESSION_START
@@ -121,8 +132,9 @@ function subscribeToAcdEvents(): void {
 
   // Agent leg (voice path) -> hand off to the voice client.
   acd.session.agentLegEvent.subscribe((leg) => {
-    CXoneVoiceClient.instance.handleAgentLegEvent(leg);
     const legAny = leg as unknown as { status?: string; agentLegId?: string };
+    console.info('[CXone] agentLeg', legAny.status, legAny.agentLegId);
+    CXoneVoiceClient.instance.handleAgentLegEvent(leg);
     if (legAny.status === 'Dialing' && legAny.agentLegId) {
       CXoneVoiceClient.instance.connectAgentLeg(legAny.agentLegId);
     }
@@ -147,6 +159,7 @@ function getAudioElement(): HTMLAudioElement {
 
 async function initWebRTC(): Promise<void> {
   try {
+    console.info('[CXone] initWebRTC: fetching agent settings + user info...');
     const client = CXoneClient.instance as unknown as {
       agentSetting: { getAgentSettings: () => Promise<unknown> };
       cxoneUser: { getUserDetails: () => Promise<unknown> };
@@ -154,7 +167,12 @@ async function initWebRTC(): Promise<void> {
     const agentSettings = await client.agentSetting.getAgentSettings();
     const userInfo = (await client.cxoneUser.getUserDetails()) as { icAgentId?: string };
     const acdAgentId = userInfo?.icAgentId;
-    if (!acdAgentId || !agentSettings) return;
+    console.info('[CXone] initWebRTC: acdAgentId=', acdAgentId, 'hasSettings=', Boolean(agentSettings));
+    if (!acdAgentId || !agentSettings) {
+      console.warn('[CXone] initWebRTC: missing agentId or settings, cannot connect WebRTC');
+      return;
+    }
+    console.info('[CXone] initWebRTC: connecting WebRTC server...');
     CXoneVoiceClient.instance.connectServer(
       String(acdAgentId),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,6 +180,7 @@ async function initWebRTC(): Promise<void> {
       getAudioElement(),
       'CXone Agent Console',
     );
+    console.info('[CXone] initWebRTC: connectServer called OK');
   } catch (e) {
     console.warn('[agentClient] WebRTC connect failed (verify on live call):', e);
   }
@@ -178,19 +197,29 @@ export async function initSession(): Promise<void> {
     useAgentStore.getState().setState('Unavailable');
     return;
   }
+  if (sessionInitStarted) {
+    console.info('[CXone] initSession: already started, skipping duplicate');
+    return;
+  }
+  sessionInitStarted = true;
   try {
+    console.info('[CXone] initSession: initAcdEngagement...');
     await CXoneAcdClient.instance.initAcdEngagement();
     subscribeToAcdEvents();
     try {
       await CXoneAcdClient.instance.session.joinSession();
+      console.info('[CXone] initSession: joinSession SUCCESS (joined existing session)');
     } catch {
       // No existing session to join; start a new WebRTC voice session.
+      console.info('[CXone] initSession: joinSession failed, starting new WebRTC session...');
       await CXoneAcdClient.instance.session.startSession({
         stationId: '',
         stationPhoneNumber: 'WebRTC',
       });
+      console.info('[CXone] initSession: startSession(WebRTC) SUCCESS');
     }
   } catch (e) {
+    sessionInitStarted = false; // allow a retry on next login attempt
     console.warn('[agentClient] initSession failed (verify after first login):', e);
   }
 }
