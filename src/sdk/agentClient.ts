@@ -343,20 +343,15 @@ function subscribeDigitalEvents(): void {
   // A digital contact arrived or was updated (includes its message thread).
   dm.onDigitalContactEvent.subscribe((c: CXoneDigitalContact) => {
     const view = mapDigitalContact(c);
-    const raw = c as unknown as Record<string, unknown>;
-    // DIAGNOSTIC: capture the contact shape so we can find the channel id and
-    // message fields for the reply payload.
+    const enriched = c as unknown as { channel?: { id?: string }; case?: { threadIdOnExternalPlatform?: string } };
+    // onDigitalContactEvent fires first with a bare contact, then again enriched
+    // with channel/case/messages. We keep the latest instance for replying.
     console.info('[CXone] digitalContact', {
       caseId: view.caseId,
       channel: view.channel,
       msgs: view.messages.length,
-      keys: Object.keys(raw).join(','),
-      channelId: raw.channelId,
-      channelIntegrationId: raw.channelIntegrationId,
-      contactId: raw.contactId,
-      threadId: raw.threadId,
-      routingQueueId: raw.routingQueueId,
-      messagesField: Array.isArray(raw.messages) ? `array(${(raw.messages as unknown[]).length})` : typeof raw.messages,
+      hasChannelId: Boolean(enriched.channel?.id),
+      hasThread: Boolean(enriched.case?.threadIdOnExternalPlatform),
     });
     liveDigital.set(view.caseId, c);
     useDigitalStore.getState().upsertContact(view);
@@ -398,12 +393,17 @@ export async function sendDigitalReply(caseId: string, text: string): Promise<vo
     case?: { threadIdOnExternalPlatform?: string };
     reply: (req: CXoneDigitalReplyRequest, channelId: string, traceId: string) => Promise<unknown>;
   };
+  const channelId = c.channel?.id;
+  if (!channelId) {
+    throw new Error('Conversation is still loading; try again in a moment.');
+  }
+  // messageContent shape per the SDK: { type: 'TEXT', payload: { text } }.
   const request = {
-    messageContent: { text },
+    messageContent: { type: 'TEXT', payload: { text } },
     thread: { idOnExternalPlatform: c.case?.threadIdOnExternalPlatform },
     recipients: [],
   } as unknown as CXoneDigitalReplyRequest;
-  await c.reply(request, c.channel?.id ?? '', crypto.randomUUID());
+  await c.reply(request, channelId, crypto.randomUUID());
 }
 
 /** Resolve / close a digital contact. */
