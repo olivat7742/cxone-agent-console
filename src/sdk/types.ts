@@ -56,11 +56,3 @@ export interface Contact {
   requiresDisposition?: boolean;
 }
 
-/** Reason codes shown when an agent goes Unavailable. */
-export const UNAVAILABLE_REASONS = [
-  'Break',
-  'Lunch',
-  'Meeting',
-  'Training',
-  'Admin Work',
-] as const;

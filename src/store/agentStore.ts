@@ -11,10 +11,13 @@ interface AgentStore {
   connected: boolean;
   agentName: string;
   state: AgentStateName;
+  /** Unavailable reason codes configured for the agent's team. */
+  unavailableCodes: string[];
 
   setConnected: (value: boolean) => void;
   setAgentName: (name: string) => void;
   setState: (state: AgentStateName) => void;
+  setUnavailableCodes: (codes: string[]) => void;
   reset: () => void;
 }
 
@@ -22,9 +25,11 @@ export const useAgentStore = create<AgentStore>((set) => ({
   connected: false,
   agentName: '',
   state: 'LoggedOut',
+  unavailableCodes: [],
 
   setConnected: (value) => set({ connected: value }),
   setAgentName: (name) => set({ agentName: name }),
   setState: (state) => set({ state }),
-  reset: () => set({ connected: false, agentName: '', state: 'LoggedOut' }),
+  setUnavailableCodes: (codes) => set({ unavailableCodes: codes }),
+  reset: () => set({ connected: false, agentName: '', state: 'LoggedOut', unavailableCodes: [] }),
 }));

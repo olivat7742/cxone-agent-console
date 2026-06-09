@@ -283,9 +283,27 @@ export async function initSession(): Promise<void> {
       });
       console.info('[CXone] initSession: startSession(WebRTC) SUCCESS');
     }
+    // Load the team's unavailable reason codes for the state dropdown.
+    void loadUnavailableCodes();
   } catch (e) {
     sessionInitStarted = false; // allow a retry on next login attempt
     console.warn('[agentClient] initSession failed (verify after first login):', e);
+  }
+}
+
+/** Load the agent team's unavailable reason codes into the store. */
+export async function loadUnavailableCodes(): Promise<void> {
+  if (MOCK_MODE) return;
+  try {
+    const res = await CXoneAcdClient.instance.agentStateService.getTeamUnavailableCodes();
+    if (Array.isArray(res)) {
+      // Only active, agent-selectable codes (exclude system ACW codes).
+      const codes = res.filter((c) => c.isActive && !c.isAcw).map((c) => c.reason);
+      console.info('[CXone] unavailableCodes', codes.length);
+      useAgentStore.getState().setUnavailableCodes(codes);
+    }
+  } catch (e) {
+    console.warn('[agentClient] loadUnavailableCodes failed:', e);
   }
 }
 

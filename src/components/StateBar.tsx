@@ -6,8 +6,7 @@ import { Box, Button, Chip, MenuItem, Select, Stack, Typography } from '@mui/mat
 import { useAgentStore } from '../store/agentStore';
 import { setState } from '../sdk/agentClient';
 import { logout } from '../auth/login';
-import { UNAVAILABLE_REASONS } from '../sdk/types';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const stateColor: Record<string, 'success' | 'warning' | 'error' | 'info' | 'default'> = {
   Available: 'success',
@@ -20,7 +19,13 @@ const stateColor: Record<string, 'success' | 'warning' | 'error' | 'info' | 'def
 export function StateBar() {
   const agentName = useAgentStore((s) => s.agentName);
   const state = useAgentStore((s) => s.state);
-  const [reason, setReason] = useState<string>(UNAVAILABLE_REASONS[0]);
+  const unavailableCodes = useAgentStore((s) => s.unavailableCodes);
+  const [reason, setReason] = useState<string>('');
+
+  // Default the selected reason to the first team code once codes load.
+  useEffect(() => {
+    if (!reason && unavailableCodes.length) setReason(unavailableCodes[0]);
+  }, [unavailableCodes, reason]);
 
   return (
     <Box
@@ -52,9 +57,15 @@ export function StateBar() {
           size="small"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          sx={{ minWidth: 130 }}
+          displayEmpty
+          sx={{ minWidth: 160 }}
         >
-          {UNAVAILABLE_REASONS.map((r) => (
+          {unavailableCodes.length === 0 && (
+            <MenuItem value="" disabled>
+              Loading codes...
+            </MenuItem>
+          )}
+          {unavailableCodes.map((r) => (
             <MenuItem key={r} value={r}>
               {r}
             </MenuItem>
@@ -64,7 +75,7 @@ export function StateBar() {
           variant="outlined"
           color="warning"
           onClick={() => setState('Unavailable', reason)}
-          disabled={state === 'OnContact'}
+          disabled={state === 'OnContact' || !reason}
         >
           Unavailable
         </Button>
