@@ -61,7 +61,10 @@ export async function restoreSession(): Promise<SessionInfo | null> {
   try {
     await CXoneAuth.instance.restoreData();
     const state = CXoneAuth.instance.getAuthState();
-    if (!state || CXoneAuth.instance.isTokenExpired()) return null;
+    // Require a genuinely valid, non-empty access token. An empty AuthState
+    // must NOT count as logged in.
+    const hasValidToken = Boolean(state?.isTokenValid && state.authToken?.accessToken);
+    if (!hasValidToken || CXoneAuth.instance.isTokenExpired()) return null;
     await CXoneClient.instance.initAuthDependentModules();
     await initSession();
     return { agentName: await resolveAgentName() };

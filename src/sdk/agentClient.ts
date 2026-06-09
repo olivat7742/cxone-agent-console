@@ -86,6 +86,18 @@ function subscribeToAcdEvents(): void {
 
   // Voice contact lifecycle -> contact store.
   acd.contactManager.voiceContactUpdateEvent.subscribe((c: CXoneVoiceContact) => {
+    // DIAGNOSTIC (temporary): logs raw contact fields so we can verify the
+    // status mapping against real CXone values on the first live call.
+    console.debug('[CXone] voiceContactUpdate', {
+      contactID: c.contactID,
+      status: c.status,
+      customerName: c.customerName,
+      ani: c.ani,
+      dnis: c.dnis,
+      callType: c.callType,
+      isInbound: c.isInbound,
+      skillName: c.skillName,
+    });
     liveContacts.set(c.contactID, c);
     const mapped = mapVoiceContact(c);
     const store = useContactStore.getState();
