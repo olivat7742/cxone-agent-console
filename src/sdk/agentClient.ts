@@ -64,6 +64,9 @@ let rawTags: CXoneTag[] = [];
 // Live digital contact instances, kept so we can reply()/changeStatus() on them.
 const liveDigital = new Map<string, CXoneDigitalContact>();
 let digitalSubscribed = false;
+// Cases we've already asked the SDK to hydrate (getContactDetails), so a bare
+// contact event does not trigger repeated fetches.
+const digitalHydrationRequested = new Set<string>();
 
 // --- Mapping helpers --------------------------------------------------------
 
@@ -351,18 +354,40 @@ function subscribeDigitalEvents(): void {
   // A digital contact arrived or was updated (includes its message thread).
   dm.onDigitalContactEvent.subscribe((c: CXoneDigitalContact) => {
     const view = mapDigitalContact(c);
-    const enriched = c as unknown as { channel?: { id?: string }; case?: { threadIdOnExternalPlatform?: string } };
+    const enriched = c as unknown as {
+      channel?: { id?: string };
+      replyChannels?: unknown;
+      case?: { threadIdOnExternalPlatform?: string };
+    };
+    const hasChannelId = Boolean(enriched.channel?.id);
     // onDigitalContactEvent fires first with a bare contact, then again enriched
     // with channel/case/messages. We keep the latest instance for replying.
-    debugLog('[CXone] digitalContact', {
+    // TEMP DIAGNOSTIC (content-free): confirm whether the enriched event arrives.
+    console.info('[CXone] digital contact event', {
       caseId: view.caseId,
       channel: view.channel,
+      status: view.status,
       msgs: view.messages.length,
-      hasChannelId: Boolean(enriched.channel?.id),
+      hasChannelId,
+      hasReplyChannels: Array.isArray(enriched.replyChannels) && enriched.replyChannels.length > 0,
       hasThread: Boolean(enriched.case?.threadIdOnExternalPlatform),
     });
     liveDigital.set(view.caseId, c);
     useDigitalStore.getState().upsertContact(view);
+
+    // If the contact is bare (no channel id, so we can't reply), ask the SDK to
+    // fetch the full details. Per the SDK docs this "gets digital contact
+    // details, publishes it and subscribes to the event hub", which should
+    // re-fire this event enriched. Guarded so it runs at most once per case.
+    if (!hasChannelId && !digitalHydrationRequested.has(view.caseId)) {
+      digitalHydrationRequested.add(view.caseId);
+      console.info('[CXone] digital contact is bare, requesting full details for', view.caseId);
+      try {
+        dm.getContactDetails(view.caseId, true);
+      } catch (e) {
+        console.warn('[CXone] getContactDetails failed:', e);
+      }
+    }
   });
 
   // A new message on a case -> refresh that case's thread from the live contact.
