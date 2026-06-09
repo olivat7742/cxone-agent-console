@@ -31,25 +31,40 @@ export function StateBar() {
     <Box
       sx={{
         display: 'flex',
+        flexDirection: { xs: 'column', md: 'row' },
         alignItems: 'center',
         justifyContent: 'space-between',
+        gap: 2,
         p: 2,
         bgcolor: 'background.paper',
         borderBottom: '1px solid',
         borderColor: 'divider',
+        boxShadow: '0 14px 36px rgba(15, 23, 42, 0.04)',
       }}
     >
       <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-        <Typography variant="h6">{agentName || 'Agent'}</Typography>
+        <Stack>
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            {agentName || 'Agent'}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Current status
+          </Typography>
+        </Stack>
         <Chip label={state} color={stateColor[state] ?? 'default'} />
       </Stack>
 
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={1}
+        sx={{ alignItems: { xs: 'stretch', sm: 'center' }, width: { xs: '100%', md: 'auto' } }}
+      >
         <Button
           variant="contained"
           color="success"
           onClick={() => setState('Available')}
           disabled={state === 'OnContact'}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}
         >
           Available
         </Button>
@@ -58,7 +73,7 @@ export function StateBar() {
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           displayEmpty
-          sx={{ minWidth: 160 }}
+          sx={{ minWidth: 160, width: { xs: '100%', sm: 'auto' } }}
         >
           {unavailableCodes.length === 0 && (
             <MenuItem value="" disabled>
@@ -76,10 +91,16 @@ export function StateBar() {
           color="warning"
           onClick={() => setState('Unavailable', reason)}
           disabled={state === 'OnContact' || !reason}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}
         >
           Unavailable
         </Button>
-        <Button variant="text" color="inherit" onClick={() => logout()}>
+        <Button
+          variant="text"
+          color="inherit"
+          onClick={() => logout()}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}
+        >
           Log out
         </Button>
       </Stack>

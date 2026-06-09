@@ -21,11 +21,11 @@ function Row({ label, value }: { label: string; value?: string }) {
 export function CustomerPanel({ contact }: { contact: Contact }) {
   return (
     <Box>
-      <Typography variant="subtitle1" gutterBottom>
-        Customer
+      <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 700 }}>
+        Customer details
       </Typography>
-      <Divider sx={{ mb: 1 }} />
-      <Stack spacing={0.5}>
+      <Divider sx={{ mb: 2 }} />
+      <Stack spacing={1.25}>
         <Row label="Name" value={contact.customerName} />
         <Row label="Contact" value={contact.customerDetail} />
         <Row label="Channel" value={contact.channel} />

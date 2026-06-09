@@ -73,7 +73,14 @@ export function OutcomePanel({ contact }: { contact: Contact }) {
   // again, a second save fails. Just let the agent finish wrap-up.
   if (alreadySaved) {
     return (
-      <Card sx={{ borderRadius: 2, boxShadow: 1 }}>
+      <Card
+        sx={{
+          borderRadius: 2,
+          boxShadow: 1,
+          border: '1px solid rgba(15, 23, 42, 0.08)',
+          overflow: 'hidden',
+        }}
+      >
         <CardContent>
           <Stack spacing={2}>
             <Box>
@@ -105,7 +112,14 @@ export function OutcomePanel({ contact }: { contact: Contact }) {
   }
 
   return (
-    <Card sx={{ borderRadius: 2, boxShadow: 1 }}>
+    <Card
+      sx={{
+        borderRadius: 2,
+        boxShadow: 1,
+        border: '1px solid rgba(15, 23, 42, 0.08)',
+        overflow: 'hidden',
+      }}
+    >
       <CardContent>
         <Stack spacing={3}>
           {/* Header */}

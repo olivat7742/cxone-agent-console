@@ -18,6 +18,42 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     primary: { main: '#0a6cff' },
+    background: {
+      default: '#eef4ff',
+      paper: '#ffffff',
+    },
+    info: {
+      main: '#3d5afe',
+    },
+    warning: {
+      main: '#f5a623',
+    },
+  },
+  components: {
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          borderRadius: 18,
+          boxShadow: '0 18px 40px rgba(15, 23, 42, 0.08)',
+        },
+      },
+    },
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          borderRadius: 18,
+          boxShadow: '0 12px 32px rgba(15, 23, 42, 0.06)',
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+          textTransform: 'none',
+        },
+      },
+    },
   },
 });
 

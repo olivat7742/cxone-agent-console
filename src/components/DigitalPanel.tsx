@@ -35,99 +35,118 @@ export function DigitalPanel() {
   }
 
   return (
-    <Paper sx={{ p: 2, mt: 2 }}>
-      <Typography variant="overline" color="primary">
-        Digital contacts
-      </Typography>
-
-      {/* Conversation selector */}
-      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap', my: 1 }}>
-        {contacts.map((c) => (
-          <Chip
-            key={c.caseId}
-            label={`${c.customerName} · ${c.channel}`}
-            color={c.caseId === selected?.caseId ? 'primary' : 'default'}
-            onClick={() => select(c.caseId)}
-            variant={c.caseId === selected?.caseId ? 'filled' : 'outlined'}
-          />
-        ))}
-      </Stack>
-
-      {selected && (
-        <Box>
-          <Divider sx={{ mb: 1 }} />
-          <Typography variant="subtitle2">
-            {selected.customerName} ({selected.channel})
+    <Paper sx={{ p: 3, mt: 2, border: '1px solid', borderColor: 'divider' }}>
+      <Stack spacing={2}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+          <Typography variant="overline" color="primary" sx={{ letterSpacing: 1.2 }}>
+            Digital contacts
           </Typography>
-
-          {/* Message thread */}
-          <Box
-            sx={{
-              my: 1,
-              p: 1,
-              maxHeight: 280,
-              overflowY: 'auto',
-              bgcolor: 'background.default',
-              borderRadius: 1,
-            }}
-          >
-            {selected.messages.length === 0 && (
-              <Typography variant="body2" color="text.secondary">
-                No messages yet.
-              </Typography>
-            )}
-            {selected.messages.map((m) => {
-              const outbound = m.direction === 'outbound';
-              return (
-                <Box
-                  key={m.id}
-                  sx={{ display: 'flex', justifyContent: outbound ? 'flex-end' : 'flex-start', mb: 0.5 }}
-                >
-                  <Box
-                    sx={{
-                      px: 1.5,
-                      py: 0.75,
-                      maxWidth: '75%',
-                      borderRadius: 2,
-                      bgcolor: outbound ? 'primary.main' : 'grey.300',
-                      color: outbound ? 'primary.contrastText' : 'text.primary',
-                    }}
-                  >
-                    <Typography variant="body2">{m.text}</Typography>
-                  </Box>
-                </Box>
-              );
-            })}
-          </Box>
-
-          {/* Reply composer */}
-          <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="Type a reply..."
-              value={reply}
-              onChange={(e) => setReply(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-            />
-            <Button variant="contained" onClick={handleSend} disabled={busy || !reply.trim()}>
-              Send
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              onClick={() => resolveDigitalContact(selected.caseId)}
-            >
-              Resolve
-            </Button>
-          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            {contacts.length} open
+          </Typography>
         </Box>
-      )}
+
+        {/* Conversation selector */}
+        <Box sx={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {contacts.map((c) => (
+            <Chip
+              key={c.caseId}
+              label={`${c.customerName} · ${c.channel}`}
+              color={c.caseId === selected?.caseId ? 'primary' : 'default'}
+              onClick={() => select(c.caseId)}
+              variant={c.caseId === selected?.caseId ? 'filled' : 'outlined'}
+              sx={{ borderRadius: 2, px: 1.25, py: 0.75 }}
+            />
+          ))}
+        </Box>
+
+        {selected && (
+          <Box>
+            <Divider sx={{ mb: 2 }} />
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  {selected.customerName}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {selected.channel}
+                </Typography>
+              </Box>
+            <Box
+              sx={{
+                my: 1,
+                p: 2,
+                minHeight: 240,
+                maxHeight: 320,
+                overflowY: 'auto',
+                bgcolor: 'grey.100',
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              {selected.messages.length === 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  No messages yet.
+                </Typography>
+              )}
+              {selected.messages.map((m) => {
+                const outbound = m.direction === 'outbound';
+                return (
+                  <Box
+                    key={m.id}
+                    sx={{ display: 'flex', justifyContent: outbound ? 'flex-end' : 'flex-start', mb: 1 }}
+                  >
+                    <Box
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        maxWidth: '75%',
+                        borderRadius: 3,
+                        bgcolor: outbound ? 'primary.main' : 'background.paper',
+                        color: outbound ? 'primary.contrastText' : 'text.primary',
+                        boxShadow: outbound
+                          ? 'none'
+                          : '0 8px 18px rgba(15, 23, 42, 0.05)',
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                        {m.text}
+                      </Typography>
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
+
+            {/* Reply composer */}
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Type a reply..."
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSend();
+                  }
+                }}
+              />
+              <Button variant="contained" onClick={handleSend} disabled={busy || !reply.trim()}>
+                Send
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={() => resolveDigitalContact(selected.caseId)}
+              >
+                Resolve
+              </Button>
+            </Stack>
+          </Box>
+        )}
+      </Stack>
     </Paper>
   );
 }

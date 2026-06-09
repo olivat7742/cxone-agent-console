@@ -11,12 +11,13 @@ export function CallControls({ contact }: { contact: Contact }) {
   const isVoice = contact.channel === 'voice';
 
   return (
-    <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: '100%' }}>
       {isVoice && (
         <Button
           variant={contact.muted ? 'contained' : 'outlined'}
           color="warning"
           onClick={() => toggleMute(contact.id)}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}
         >
           {contact.muted ? 'Unmute' : 'Mute'}
         </Button>
@@ -25,14 +26,24 @@ export function CallControls({ contact }: { contact: Contact }) {
         <Button
           variant={onHold ? 'contained' : 'outlined'}
           onClick={() => (onHold ? unhold(contact.id) : hold(contact.id))}
+          sx={{ width: { xs: '100%', sm: 'auto' } }}
         >
           {onHold ? 'Resume' : 'Hold'}
         </Button>
       )}
-      <Button variant="outlined" disabled>
+      <Button
+        variant="outlined"
+        disabled
+        sx={{ width: { xs: '100%', sm: 'auto' }, opacity: 0.7 }}
+      >
         Transfer
       </Button>
-      <Button variant="contained" color="error" onClick={() => endContact(contact.id)}>
+      <Button
+        variant="contained"
+        color="error"
+        onClick={() => endContact(contact.id)}
+        sx={{ width: { xs: '100%', sm: 'auto' } }}
+      >
         End
       </Button>
     </Stack>
