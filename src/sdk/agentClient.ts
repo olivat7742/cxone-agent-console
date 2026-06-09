@@ -45,6 +45,14 @@ import type {
 /** Set true to use the in-app simulator instead of the real SDK (UI demos). */
 export const MOCK_MODE = false;
 
+// Verbose SDK diagnostics. Off by default to keep the console clean (and avoid
+// logging customer data like ANI). Flip to true when debugging the SDK, e.g.
+// when resuming the digital messaging work.
+const DEBUG = false;
+function debugLog(...args: unknown[]): void {
+  if (DEBUG) console.info(...args);
+}
+
 // --- Live contact instances (real mode) ------------------------------------
 // We keep the live CXoneVoiceContact objects so action methods can call their
 // own hold()/resume()/mute()/end() helpers.
@@ -184,7 +192,7 @@ function subscribeToAcdEvents(): void {
 
   // Agent state changes -> agent store.
   acd.agentStateService.agentStateSubject.subscribe((event: AgentStateEvent) => {
-    console.info('[CXone] agentState', {
+    debugLog('[CXone] agentState', {
       state: event?.currentState?.state,
       cxoneState: event?.currentState?.cxoneState,
       reason: event?.currentState?.reason,
@@ -209,7 +217,7 @@ function subscribeToAcdEvents(): void {
   acd.contactManager.voiceContactUpdateEvent.subscribe((c: CXoneVoiceContact) => {
     // DIAGNOSTIC (temporary): logs raw contact fields so we can verify the
     // status mapping against real CXone values on the first live call.
-    console.info('[CXone] voiceContactUpdate', {
+    debugLog('[CXone] voiceContactUpdate', {
       contactID: c.contactID,
       status: c.status,
       isRequireManualAccept: c.isRequireManualAccept,
@@ -229,7 +237,7 @@ function subscribeToAcdEvents(): void {
   // Work item contact lifecycle -> contact store (same lifecycle as voice).
   acd.contactManager.workItemContactUpdateEvent.subscribe((c: CXoneWorkItemContact) => {
     const mapped = mapWorkItemContact(c);
-    console.info('[CXone] workItemContactUpdate', { id: mapped.id, status: mapped.status });
+    debugLog('[CXone] workItemContactUpdate', { id: mapped.id, status: mapped.status });
     applyAcdContactUpdate(mapped);
   });
 
@@ -240,7 +248,7 @@ function subscribeToAcdEvents(): void {
         id: d.dispositionId,
         name: d.dispositionName,
       }));
-      console.info('[CXone] dispositions', list.length);
+      debugLog('[CXone] dispositions', list.length);
       useOutcomeStore.getState().setDispositions(list);
     }
   });
@@ -250,14 +258,14 @@ function subscribeToAcdEvents(): void {
     const resp = data as TagsResponse;
     if (resp && Array.isArray(resp.tags)) {
       rawTags = resp.tags;
-      console.info('[CXone] tags', resp.tags.length);
+      debugLog('[CXone] tags', resp.tags.length);
       useOutcomeStore.getState().setTags(resp.tags.map((t) => ({ id: t.tagId, name: t.tagName })));
     }
   });
 
   // Session lifecycle -> start WebRTC when the session is up.
   acd.session.onAgentSessionChange.subscribe((res: AgentSessionResponse) => {
-    console.info('[CXone] sessionChange', res.status);
+    debugLog('[CXone] sessionChange', res.status);
     if (
       res.status === AgentSessionStatus.JOIN_SESSION_SUCCESS ||
       res.status === AgentSessionStatus.SESSION_START
@@ -269,7 +277,7 @@ function subscribeToAcdEvents(): void {
   // Agent leg (voice path) -> hand off to the voice client.
   acd.session.agentLegEvent.subscribe((leg) => {
     const legAny = leg as unknown as { status?: string; agentLegId?: string };
-    console.info('[CXone] agentLeg', legAny.status, legAny.agentLegId);
+    debugLog('[CXone] agentLeg', legAny.status, legAny.agentLegId);
     CXoneVoiceClient.instance.handleAgentLegEvent(leg);
     if (legAny.status === 'Dialing' && legAny.agentLegId) {
       CXoneVoiceClient.instance.connectAgentLeg(legAny.agentLegId);
@@ -279,10 +287,10 @@ function subscribeToAcdEvents(): void {
   // WebRTC voice client status. These are the REAL success/failure signals for
   // the audio path (per the SDK docs), connectServer returning is not enough.
   CXoneVoiceClient.instance.onConnectionStatusChanged.subscribe((conn) => {
-    console.info('[CXone] voiceConnectionStatus', conn);
+    debugLog('[CXone] voiceConnectionStatus', conn);
   });
   CXoneVoiceClient.instance.onCallStatusChanged.subscribe((call) => {
-    console.info('[CXone] voiceCallStatus', call);
+    debugLog('[CXone] voiceCallStatus', call);
   });
 }
 
@@ -304,7 +312,7 @@ function getAudioElement(): HTMLAudioElement {
 
 async function initWebRTC(): Promise<void> {
   try {
-    console.info('[CXone] initWebRTC: fetching agent settings + user info...');
+    debugLog('[CXone] initWebRTC: fetching agent settings + user info...');
     const client = CXoneClient.instance as unknown as {
       agentSetting: { getAgentSettings: () => Promise<unknown> };
       cxoneUser: { getUserDetails: () => Promise<unknown> };
@@ -312,12 +320,12 @@ async function initWebRTC(): Promise<void> {
     const agentSettings = await client.agentSetting.getAgentSettings();
     const userInfo = (await client.cxoneUser.getUserDetails()) as { icAgentId?: string };
     const acdAgentId = userInfo?.icAgentId;
-    console.info('[CXone] initWebRTC: acdAgentId=', acdAgentId, 'hasSettings=', Boolean(agentSettings));
+    debugLog('[CXone] initWebRTC: acdAgentId=', acdAgentId, 'hasSettings=', Boolean(agentSettings));
     if (!acdAgentId || !agentSettings) {
       console.warn('[CXone] initWebRTC: missing agentId or settings, cannot connect WebRTC');
       return;
     }
-    console.info('[CXone] initWebRTC: connecting WebRTC server...');
+    debugLog('[CXone] initWebRTC: connecting WebRTC server...');
     CXoneVoiceClient.instance.connectServer(
       String(acdAgentId),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -325,7 +333,7 @@ async function initWebRTC(): Promise<void> {
       getAudioElement(),
       'CXone Agent Console',
     );
-    console.info('[CXone] initWebRTC: connectServer called OK');
+    debugLog('[CXone] initWebRTC: connectServer called OK');
   } catch (e) {
     console.warn('[agentClient] WebRTC connect failed (verify on live call):', e);
   }
@@ -346,7 +354,7 @@ function subscribeDigitalEvents(): void {
     const enriched = c as unknown as { channel?: { id?: string }; case?: { threadIdOnExternalPlatform?: string } };
     // onDigitalContactEvent fires first with a bare contact, then again enriched
     // with channel/case/messages. We keep the latest instance for replying.
-    console.info('[CXone] digitalContact', {
+    debugLog('[CXone] digitalContact', {
       caseId: view.caseId,
       channel: view.channel,
       msgs: view.messages.length,
@@ -361,7 +369,7 @@ function subscribeDigitalEvents(): void {
   dm.onDigitalContactNewMessageEvent.subscribe((evt: unknown) => {
     const e = evt as { caseId?: string; contactId?: string };
     const caseId = e?.caseId || e?.contactId;
-    console.info('[CXone] digitalNewMessage', caseId);
+    debugLog('[CXone] digitalNewMessage', caseId);
     if (!caseId) return;
     const live = liveDigital.get(String(caseId));
     if (live) {
@@ -375,10 +383,10 @@ function subscribeDigitalEvents(): void {
 export async function initDigital(): Promise<void> {
   if (MOCK_MODE) return;
   try {
-    console.info('[CXone] initDigital: initDigitalEngagement...');
+    debugLog('[CXone] initDigital: initDigitalEngagement...');
     await CXoneDigitalClient.instance.initDigitalEngagement();
     subscribeDigitalEvents();
-    console.info('[CXone] initDigital: ready');
+    debugLog('[CXone] initDigital: ready');
   } catch (e) {
     console.warn('[agentClient] initDigital failed (verify on first digital contact):', e);
   }
@@ -425,25 +433,25 @@ export async function initSession(): Promise<void> {
     return;
   }
   if (sessionInitStarted) {
-    console.info('[CXone] initSession: already started, skipping duplicate');
+    debugLog('[CXone] initSession: already started, skipping duplicate');
     return;
   }
   sessionInitStarted = true;
   try {
-    console.info('[CXone] initSession: initAcdEngagement...');
+    debugLog('[CXone] initSession: initAcdEngagement...');
     await CXoneAcdClient.instance.initAcdEngagement();
     subscribeToAcdEvents();
     try {
       await CXoneAcdClient.instance.session.joinSession();
-      console.info('[CXone] initSession: joinSession SUCCESS (joined existing session)');
+      debugLog('[CXone] initSession: joinSession SUCCESS (joined existing session)');
     } catch {
       // No existing session to join; start a new WebRTC voice session.
-      console.info('[CXone] initSession: joinSession failed, starting new WebRTC session...');
+      debugLog('[CXone] initSession: joinSession failed, starting new WebRTC session...');
       await CXoneAcdClient.instance.session.startSession({
         stationId: '',
         stationPhoneNumber: 'WebRTC',
       });
-      console.info('[CXone] initSession: startSession(WebRTC) SUCCESS');
+      debugLog('[CXone] initSession: startSession(WebRTC) SUCCESS');
     }
     // Load the team's unavailable reason codes for the state dropdown.
     void loadUnavailableCodes();
@@ -463,7 +471,7 @@ export async function loadUnavailableCodes(): Promise<void> {
     if (Array.isArray(res)) {
       // Only active, agent-selectable codes (exclude system ACW codes).
       const codes = res.filter((c) => c.isActive && !c.isAcw).map((c) => c.reason);
-      console.info('[CXone] unavailableCodes', codes.length);
+      debugLog('[CXone] unavailableCodes', codes.length);
       useAgentStore.getState().setUnavailableCodes(codes);
     }
   } catch (e) {

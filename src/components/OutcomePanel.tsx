@@ -9,6 +9,8 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   Divider,
   FormControl,
@@ -71,104 +73,183 @@ export function OutcomePanel({ contact }: { contact: Contact }) {
   // again, a second save fails. Just let the agent finish wrap-up.
   if (alreadySaved) {
     return (
-      <Box>
-        <Typography variant="subtitle1" gutterBottom>
-          {isWrapUp ? 'Wrap-up' : 'Outcome'}
-        </Typography>
-        <Divider sx={{ mb: 1.5 }} />
-        <Stack spacing={2}>
-          <Alert severity="success">Outcome already saved for this contact.</Alert>
-          {isWrapUp && (
-            <Button variant="contained" onClick={() => completeWrapUp(contact.id)}>
-              Complete wrap-up
-            </Button>
-          )}
-        </Stack>
-      </Box>
+      <Card sx={{ borderRadius: 2, boxShadow: 1 }}>
+        <CardContent>
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                {isWrapUp ? 'Wrap-up' : 'Outcome'}
+              </Typography>
+            </Box>
+            <Divider />
+            <Alert severity="success" sx={{ borderRadius: 1 }}>
+              <Typography variant="body2">
+                ✓ Outcome already saved for this contact.
+              </Typography>
+            </Alert>
+            {isWrapUp && (
+              <Button
+                variant="contained"
+                onClick={() => completeWrapUp(contact.id)}
+                fullWidth
+                size="large"
+                sx={{ mt: 1 }}
+              >
+                Complete wrap-up
+              </Button>
+            )}
+          </Stack>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <Box>
-      <Typography variant="subtitle1" gutterBottom>
-        {isWrapUp ? 'Wrap-up' : 'Outcome'}
-      </Typography>
-      <Divider sx={{ mb: 1.5 }} />
-
-      <Stack spacing={2}>
-        <FormControl fullWidth size="small" required={needsDisposition}>
-          <InputLabel id="disposition-label">Disposition</InputLabel>
-          <Select
-            labelId="disposition-label"
-            label="Disposition"
-            value={dispositionId}
-            onChange={(e) => setDispositionId(e.target.value)}
-          >
-            <MenuItem value="">
-              <em>None</em>
-            </MenuItem>
-            {dispositions.map((d) => (
-              <MenuItem key={d.id} value={String(d.id)}>
-                {d.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <FormControl fullWidth size="small">
-          <InputLabel id="tags-label">Tags</InputLabel>
-          <Select
-            labelId="tags-label"
-            multiple
-            value={tagIds}
-            onChange={(e) =>
-              setTagIds(
-                typeof e.target.value === 'string'
-                  ? e.target.value.split(',').map(Number)
-                  : (e.target.value as number[]),
-              )
-            }
-            input={<OutlinedInput label="Tags" />}
-            renderValue={(selected) => (
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {(selected as number[]).map((id) => {
-                  const t = tags.find((x) => x.id === id);
-                  return <Chip key={id} size="small" label={t ? t.name : id} />;
-                })}
-              </Box>
+    <Card sx={{ borderRadius: 2, boxShadow: 1 }}>
+      <CardContent>
+        <Stack spacing={3}>
+          {/* Header */}
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              {isWrapUp ? 'Wrap-up' : 'Outcome'}
+            </Typography>
+            {needsDisposition && (
+              <Chip
+                label="Required"
+                size="small"
+                color="warning"
+                variant="outlined"
+                sx={{ mt: 1 }}
+              />
             )}
-          >
-            {tags.map((t) => (
-              <MenuItem key={t.id} value={t.id}>
-                {t.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+          </Box>
+          <Divider sx={{ my: 0 }} />
 
-        <TextField
-          label="Comment"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          multiline
-          minRows={2}
-          size="small"
-          fullWidth
-        />
+          {/* Disposition Field */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+              Disposition {needsDisposition && <span style={{ color: '#d32f2f' }}>*</span>}
+            </Typography>
+            <FormControl fullWidth size="small" required={needsDisposition}>
+              <InputLabel id="disposition-label">Select a disposition</InputLabel>
+              <Select
+                labelId="disposition-label"
+                label="Select a disposition"
+                value={dispositionId}
+                onChange={(e) => setDispositionId(e.target.value)}
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                {dispositions.map((d) => (
+                  <MenuItem key={d.id} value={String(d.id)}>
+                    {d.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
 
-        {result && <Alert severity={result.ok ? 'success' : 'error'}>{result.msg}</Alert>}
+          {/* Tags Field */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+              Tags
+            </Typography>
+            <FormControl fullWidth size="small">
+              <InputLabel id="tags-label">Select tags</InputLabel>
+              <Select
+                labelId="tags-label"
+                multiple
+                value={tagIds}
+                onChange={(e) =>
+                  setTagIds(
+                    typeof e.target.value === 'string'
+                      ? e.target.value.split(',').map(Number)
+                      : (e.target.value as number[]),
+                  )
+                }
+                input={<OutlinedInput label="Select tags" />}
+                renderValue={(selected) => (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {(selected as number[]).map((id) => {
+                      const t = tags.find((x) => x.id === id);
+                      return (
+                        <Chip
+                          key={id}
+                          size="small"
+                          label={t ? t.name : id}
+                          variant="outlined"
+                        />
+                      );
+                    })}
+                  </Box>
+                )}
+              >
+                {tags.map((t) => (
+                  <MenuItem key={t.id} value={t.id}>
+                    {t.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
 
-        {!isWrapUp && (
-          <Typography variant="caption" color="text.secondary">
-            You can prepare the outcome now. Submit becomes available when the
-            call ends (wrap-up).
-          </Typography>
-        )}
+          {/* Comment Field */}
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+              Comment
+            </Typography>
+            <TextField
+              label="Add optional notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              multiline
+              minRows={3}
+              size="small"
+              fullWidth
+              placeholder="Enter any additional information or notes..."
+            />
+          </Box>
 
-        <Button variant="contained" onClick={handleSave} disabled={!canSave}>
-          {busy ? 'Saving...' : 'Save & complete'}
-        </Button>
-      </Stack>
-    </Box>
+          {/* Status Messages */}
+          {result && (
+            <Alert
+              severity={result.ok ? 'success' : 'error'}
+              sx={{ borderRadius: 1 }}
+            >
+              <Typography variant="body2">{result.msg}</Typography>
+            </Alert>
+          )}
+
+          {/* Information message */}
+          {!isWrapUp && (
+            <Alert severity="info" sx={{ borderRadius: 1 }}>
+              <Typography variant="caption">
+                💡 You can prepare the outcome now. The Save button becomes available
+                when the call ends (wrap-up).
+              </Typography>
+            </Alert>
+          )}
+
+          {/* Action Buttons */}
+          <Stack direction="row" spacing={1.5} sx={{ pt: 1 }}>
+            <Button
+              variant="contained"
+              onClick={handleSave}
+              disabled={!canSave}
+              size="large"
+              fullWidth
+              sx={{
+                fontWeight: 600,
+                textTransform: 'none',
+                fontSize: '1rem',
+              }}
+            >
+              {busy ? 'Saving...' : 'Save & complete'}
+            </Button>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
   );
 }
