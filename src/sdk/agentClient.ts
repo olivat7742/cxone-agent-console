@@ -18,7 +18,7 @@ import { CXoneAcdClient, CXoneVoiceContact, CXoneWorkItemContact } from '@nice-d
 import { CXoneVoiceClient } from '@nice-devone/voice-sdk';
 import { CXoneDigitalClient, CXoneDigitalContact } from '@nice-devone/digital-sdk';
 import { CXoneClient } from '@nice-devone/agent-sdk';
-import { AgentSessionStatus } from '@nice-devone/common-sdk';
+import { AgentSessionStatus, MediaType } from '@nice-devone/common-sdk';
 import type {
   AgentState,
   AgentStateEvent,
@@ -40,6 +40,8 @@ import type {
   ContactStatus,
   DigitalContactView,
   DigitalMessage,
+  DispositionOption,
+  TagOption,
 } from './types';
 
 /** Set true to use the in-app simulator instead of the real SDK (UI demos). */
@@ -408,6 +410,7 @@ interface DigitalDetail {
   channel?: { id?: string };
   thread?: { idOnExternalPlatform?: string };
   messages?: unknown;
+  customerContact?: { skillId?: string | number };
 }
 
 /**
@@ -484,8 +487,81 @@ export async function resolveDigitalContact(caseId: string): Promise<void> {
   await (contact as unknown as { changeStatus: (s: string) => Promise<unknown> }).changeStatus('resolved');
   liveDigital.delete(caseId);
   lastDigitalSig.delete(caseId);
+  rawDigitalTags.delete(caseId);
   useDigitalStore.getState().removeContact(caseId);
   if (useDigitalStore.getState().contacts.length === 0) stopDigitalPolling();
+}
+
+// --- Digital wrap-up (ACW) --------------------------------------------------
+// Raw tag objects per case, kept so saveDigitalOutcome can send full CXoneTag
+// payloads (the UI only carries id + name).
+const rawDigitalTags = new Map<string, CXoneTag[]>();
+
+/** The disposition service used for digital contacts. */
+function digitalDispositionService() {
+  return CXoneDigitalClient.instance.digitalContactManager.dispositionService;
+}
+
+/**
+ * Begin wrap-up for a digital contact: fetch the disposition + tag options for
+ * the contact's skill and flag the contact as in wrap-up. Does NOT close the
+ * case; that happens on completeDigitalWrapUp. Never throws.
+ */
+export async function beginDigitalWrapUp(caseId: string): Promise<void> {
+  let dispositions: DispositionOption[] = [];
+  let tags: TagOption[] = [];
+  try {
+    const detail = await fetchDigitalDetail(caseId);
+    const skillId = detail?.customerContact?.skillId;
+    if (skillId != null) {
+      const svc = digitalDispositionService();
+      const disps = await svc.getDispositions(String(skillId), MediaType.DIGITAL, caseId);
+      if (Array.isArray(disps)) {
+        dispositions = disps.map((d) => ({ id: d.dispositionId, name: d.dispositionName }));
+      }
+      const tagsResp = (await svc.getTags(String(skillId))) as TagsResponse;
+      if (tagsResp && Array.isArray(tagsResp.tags)) {
+        rawDigitalTags.set(caseId, tagsResp.tags);
+        tags = tagsResp.tags.map((t) => ({ id: t.tagId, name: t.tagName }));
+      }
+    }
+    console.info('[CXone] digital wrap-up options', {
+      caseId,
+      skillId,
+      dispositions: dispositions.length,
+      tags: tags.length,
+    });
+  } catch (e) {
+    console.warn('[agentClient] beginDigitalWrapUp: failed to load options:', e);
+  }
+  useDigitalStore.getState().patchContact(caseId, { wrapup: true, dispositions, tags });
+}
+
+/** Save the disposition (+ optional comment) and tags for a digital contact. */
+export async function saveDigitalOutcome(
+  caseId: string,
+  dispositionId: number | null,
+  notes: string,
+  tagIds: number[],
+): Promise<void> {
+  const svc = digitalDispositionService();
+  if (dispositionId != null) {
+    const details = {
+      primaryDispositionId: dispositionId,
+      primaryDispositionNotes: notes,
+    } as CXoneDispositionDetails;
+    await svc.saveDisposition(caseId, details);
+  }
+  if (tagIds.length) {
+    const all = rawDigitalTags.get(caseId) ?? [];
+    const selected = all.filter((t) => tagIds.includes(t.tagId));
+    if (selected.length) await svc.saveTags(caseId, selected);
+  }
+}
+
+/** Finish wrap-up: resolve/close the digital contact and clear it from the UI. */
+export async function completeDigitalWrapUp(caseId: string): Promise<void> {
+  await resolveDigitalContact(caseId);
 }
 
 /**

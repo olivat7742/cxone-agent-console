@@ -46,6 +46,12 @@ export interface DigitalContactView {
   customerName: string;
   status: string;
   messages: DigitalMessage[];
+  /** True once the agent has ended the conversation and is in wrap-up (ACW). */
+  wrapup?: boolean;
+  /** Disposition options for this contact, loaded when wrap-up begins. */
+  dispositions?: DispositionOption[];
+  /** Tag options for this contact, loaded when wrap-up begins. */
+  tags?: TagOption[];
 }
 
 /** A single customer interaction (call, chat, email, etc.). */

@@ -12,6 +12,7 @@ interface DigitalStore {
 
   upsertContact: (contact: DigitalContactView) => void;
   setMessages: (caseId: string, messages: DigitalMessage[]) => void;
+  patchContact: (caseId: string, partial: Partial<DigitalContactView>) => void;
   select: (caseId: string | null) => void;
   removeContact: (caseId: string) => void;
   clear: () => void;
@@ -41,6 +42,11 @@ export const useDigitalStore = create<DigitalStore>((set) => ({
   setMessages: (caseId, messages) =>
     set((s) => ({
       contacts: s.contacts.map((c) => (c.caseId === caseId ? { ...c, messages } : c)),
+    })),
+
+  patchContact: (caseId, partial) =>
+    set((s) => ({
+      contacts: s.contacts.map((c) => (c.caseId === caseId ? { ...c, ...partial } : c)),
     })),
 
   select: (caseId) => set({ selectedCaseId: caseId }),

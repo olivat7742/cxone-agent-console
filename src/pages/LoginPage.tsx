@@ -39,7 +39,7 @@ export function LoginPage() {
       <Card sx={{ width: 420 }}>
         <CardContent>
           <Typography variant="h5" gutterBottom>
-            CXone Agent Console
+            OAT CXone Agent Console
           </Typography>
 
           {configured ? (
