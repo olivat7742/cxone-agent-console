@@ -139,6 +139,15 @@ function subscribeToAcdEvents(): void {
       CXoneVoiceClient.instance.connectAgentLeg(legAny.agentLegId);
     }
   });
+
+  // WebRTC voice client status. These are the REAL success/failure signals for
+  // the audio path (per the SDK docs), connectServer returning is not enough.
+  CXoneVoiceClient.instance.onConnectionStatusChanged.subscribe((conn) => {
+    console.info('[CXone] voiceConnectionStatus', conn);
+  });
+  CXoneVoiceClient.instance.onCallStatusChanged.subscribe((call) => {
+    console.info('[CXone] voiceCallStatus', call);
+  });
 }
 
 // --- WebRTC bootstrap (real mode) -------------------------------------------

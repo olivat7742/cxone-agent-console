@@ -5,6 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>cxone-agent-console</title>
+    <!-- AudioCodes WebRTC library required by @nice-devone/voice-sdk. Must load
+         as a global before the app so CXoneVoiceClient.connectServer can
+         establish the WebRTC media connection. Served from /public. -->
+    <script type="text/javascript" src="/ac_webrtc.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
