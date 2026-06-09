@@ -343,7 +343,15 @@ function subscribeDigitalEvents(): void {
   // A digital contact arrived or was updated (includes its message thread).
   dm.onDigitalContactEvent.subscribe((c: CXoneDigitalContact) => {
     const view = mapDigitalContact(c);
-    console.info('[CXone] digitalContact', { caseId: view.caseId, channel: view.channel, msgs: view.messages.length });
+    const raw = c as unknown as Record<string, unknown>;
+    // DIAGNOSTIC: capture the channel/id shape so we can fix the reply payload.
+    console.info('[CXone] digitalContact', {
+      caseId: view.caseId,
+      channel: view.channel,
+      msgs: view.messages.length,
+      channelObj: raw.channel,
+      contactKeys: Object.keys(raw),
+    });
     liveDigital.set(view.caseId, c);
     useDigitalStore.getState().upsertContact(view);
   });
