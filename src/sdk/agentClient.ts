@@ -18,9 +18,18 @@ import { CXoneAcdClient, CXoneVoiceContact } from '@nice-devone/acd-sdk';
 import { CXoneVoiceClient } from '@nice-devone/voice-sdk';
 import { CXoneClient } from '@nice-devone/agent-sdk';
 import { AgentSessionStatus } from '@nice-devone/common-sdk';
-import type { AgentState, AgentStateEvent, AgentSessionResponse } from '@nice-devone/common-sdk';
+import type {
+  AgentState,
+  AgentStateEvent,
+  AgentSessionResponse,
+  CXoneDisposition,
+  CXoneTag,
+  TagsResponse,
+  CXoneDispositionDetails,
+} from '@nice-devone/common-sdk';
 import { useAgentStore } from '../store/agentStore';
 import { useContactStore } from '../store/contactStore';
+import { useOutcomeStore } from '../store/outcomeStore';
 import type { AgentStateName, Contact, ContactChannel, ContactStatus } from './types';
 
 /** Set true to use the in-app simulator instead of the real SDK (UI demos). */
@@ -32,6 +41,8 @@ export const MOCK_MODE = false;
 const liveContacts = new Map<string, CXoneVoiceContact>();
 let acdSubscribed = false;
 let sessionInitStarted = false;
+// Raw tag objects for the current contact, kept so saveTags can send full CXoneTag payloads.
+let rawTags: CXoneTag[] = [];
 
 // --- Mapping helpers --------------------------------------------------------
 
@@ -60,6 +71,8 @@ function mapVoiceContact(c: CXoneVoiceContact): Contact {
     // Only require manual accept when the flag is explicitly true. Voice
     // contacts here report false (auto-answer), so we must not show Accept.
     requiresAccept: c.isRequireManualAccept === true,
+    allowDispositions: c.allowDispositions,
+    requiresDisposition: c.requireDisposition,
   };
 }
 
@@ -112,10 +125,38 @@ function subscribeToAcdEvents(): void {
     const mapped = mapVoiceContact(c);
     const store = useContactStore.getState();
     if (mapped.status === 'ended') {
-      store.removeContact(mapped.id);
+      if (mapped.allowDispositions) {
+        // Call disconnected but dispositions are allowed: keep it in wrap-up
+        // (ACW) so the agent can disposition before it leaves the console.
+        store.upsertContact({ ...mapped, status: 'wrapup' });
+      } else {
+        store.removeContact(mapped.id);
+      }
       liveContacts.delete(mapped.id);
     } else {
       store.upsertContact(mapped);
+    }
+  });
+
+  // Available dispositions for the current contact -> outcome store.
+  acd.contactManager.onDispositionEvent.subscribe((data) => {
+    if (Array.isArray(data)) {
+      const list = (data as CXoneDisposition[]).map((d) => ({
+        id: d.dispositionId,
+        name: d.dispositionName,
+      }));
+      console.info('[CXone] dispositions', list.length);
+      useOutcomeStore.getState().setDispositions(list);
+    }
+  });
+
+  // Available tags for the current contact -> outcome store.
+  acd.contactManager.onTagsEvent.subscribe((data) => {
+    const resp = data as TagsResponse;
+    if (resp && Array.isArray(resp.tags)) {
+      rawTags = resp.tags;
+      console.info('[CXone] tags', resp.tags.length);
+      useOutcomeStore.getState().setTags(resp.tags.map((t) => ({ id: t.tagId, name: t.tagName })));
     }
   });
 
@@ -294,6 +335,34 @@ export async function endContact(id: string): Promise<void> {
   const c = liveContacts.get(id);
   if (c) await c.end();
   else await CXoneAcdClient.instance.contactManager.contactService.endContact(id);
+}
+
+/** Save the disposition (+ optional comment) and tags for a contact. */
+export async function saveOutcome(
+  contactId: string,
+  dispositionId: number | null,
+  notes: string,
+  tagIds: number[],
+): Promise<void> {
+  if (MOCK_MODE) return;
+  const svc = CXoneAcdClient.instance.contactManager.dispositionService;
+  if (dispositionId != null) {
+    const details = {
+      primaryDispositionId: dispositionId,
+      primaryDispositionNotes: notes,
+    } as CXoneDispositionDetails;
+    await svc.saveDisposition(contactId, details);
+  }
+  if (tagIds.length) {
+    const selected = rawTags.filter((t) => tagIds.includes(t.tagId));
+    if (selected.length) await svc.saveTags(contactId, selected);
+  }
+}
+
+/** Complete wrap-up: remove the contact from the console and clear outcome options. */
+export function completeWrapUp(id: string): void {
+  useContactStore.getState().removeContact(id);
+  useOutcomeStore.getState().clear();
 }
 
 // --- Mock simulator (MOCK_MODE only) ----------------------------------------

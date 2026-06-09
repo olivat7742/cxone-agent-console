@@ -17,8 +17,20 @@ export type AgentStateName =
 /** The communication channel a contact arrives on. */
 export type ContactChannel = 'voice' | 'chat' | 'email' | 'work_item';
 
-/** Where a contact is in its lifecycle. */
-export type ContactStatus = 'offered' | 'active' | 'hold' | 'ended';
+/** Where a contact is in its lifecycle. 'wrapup' = disconnected, awaiting disposition (ACW). */
+export type ContactStatus = 'offered' | 'active' | 'hold' | 'wrapup' | 'ended';
+
+/** A disposition option the agent can pick at wrap-up. */
+export interface DispositionOption {
+  id: number;
+  name: string;
+}
+
+/** A tag option the agent can attach to the contact. */
+export interface TagOption {
+  id: number;
+  name: string;
+}
 
 /** A single customer interaction (call, chat, email, etc.). */
 export interface Contact {
@@ -38,6 +50,10 @@ export interface Contact {
    * Accept button must NOT be shown, calling accept would be a 409 conflict.
    */
   requiresAccept?: boolean;
+  /** Whether dispositions are allowed for this contact (show the outcome panel). */
+  allowDispositions?: boolean;
+  /** Whether a disposition is required before wrap-up can complete. */
+  requiresDisposition?: boolean;
 }
 
 /** Reason codes shown when an agent goes Unavailable. */
