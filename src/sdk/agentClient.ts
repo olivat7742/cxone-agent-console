@@ -344,13 +344,19 @@ function subscribeDigitalEvents(): void {
   dm.onDigitalContactEvent.subscribe((c: CXoneDigitalContact) => {
     const view = mapDigitalContact(c);
     const raw = c as unknown as Record<string, unknown>;
-    // DIAGNOSTIC: capture the channel/id shape so we can fix the reply payload.
+    // DIAGNOSTIC: capture the contact shape so we can find the channel id and
+    // message fields for the reply payload.
     console.info('[CXone] digitalContact', {
       caseId: view.caseId,
       channel: view.channel,
       msgs: view.messages.length,
-      channelObj: raw.channel,
-      contactKeys: Object.keys(raw),
+      keys: Object.keys(raw).join(','),
+      channelId: raw.channelId,
+      channelIntegrationId: raw.channelIntegrationId,
+      contactId: raw.contactId,
+      threadId: raw.threadId,
+      routingQueueId: raw.routingQueueId,
+      messagesField: Array.isArray(raw.messages) ? `array(${(raw.messages as unknown[]).length})` : typeof raw.messages,
     });
     liveDigital.set(view.caseId, c);
     useDigitalStore.getState().upsertContact(view);
