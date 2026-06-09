@@ -41,7 +41,6 @@ import type {
   DigitalContactView,
   DigitalMessage,
   DispositionOption,
-  TagOption,
 } from './types';
 
 /** Set true to use the in-app simulator instead of the real SDK (UI demos). */
@@ -487,15 +486,14 @@ export async function resolveDigitalContact(caseId: string): Promise<void> {
   await (contact as unknown as { changeStatus: (s: string) => Promise<unknown> }).changeStatus('resolved');
   liveDigital.delete(caseId);
   lastDigitalSig.delete(caseId);
-  rawDigitalTags.delete(caseId);
   useDigitalStore.getState().removeContact(caseId);
   if (useDigitalStore.getState().contacts.length === 0) stopDigitalPolling();
 }
 
 // --- Digital wrap-up (ACW) --------------------------------------------------
-// Raw tag objects per case, kept so saveDigitalOutcome can send full CXoneTag
-// payloads (the UI only carries id + name).
-const rawDigitalTags = new Map<string, CXoneTag[]>();
+// Note: digital tags are intentionally not supported. The ACD tags endpoint
+// (contacts/{id}/tags) rejects a digital caseId with "InvalidContactId", so the
+// wrap-up offers disposition + notes only (both verified working for digital).
 
 /** The disposition service used for digital contacts. */
 function digitalDispositionService() {
@@ -503,13 +501,12 @@ function digitalDispositionService() {
 }
 
 /**
- * Begin wrap-up for a digital contact: fetch the disposition + tag options for
- * the contact's skill and flag the contact as in wrap-up. Does NOT close the
- * case; that happens on completeDigitalWrapUp. Never throws.
+ * Begin wrap-up for a digital contact: fetch the disposition options for the
+ * contact's skill and flag the contact as in wrap-up. Does NOT close the case;
+ * that happens on completeDigitalWrapUp. Never throws.
  */
 export async function beginDigitalWrapUp(caseId: string): Promise<void> {
   let dispositions: DispositionOption[] = [];
-  let tags: TagOption[] = [];
   try {
     const detail = await fetchDigitalDetail(caseId);
     const skillId = detail?.customerContact?.skillId;
@@ -519,44 +516,26 @@ export async function beginDigitalWrapUp(caseId: string): Promise<void> {
       if (Array.isArray(disps)) {
         dispositions = disps.map((d) => ({ id: d.dispositionId, name: d.dispositionName }));
       }
-      const tagsResp = (await svc.getTags(String(skillId))) as TagsResponse;
-      if (tagsResp && Array.isArray(tagsResp.tags)) {
-        rawDigitalTags.set(caseId, tagsResp.tags);
-        tags = tagsResp.tags.map((t) => ({ id: t.tagId, name: t.tagName }));
-      }
     }
-    console.info('[CXone] digital wrap-up options', {
-      caseId,
-      skillId,
-      dispositions: dispositions.length,
-      tags: tags.length,
-    });
+    console.info('[CXone] digital wrap-up options', { caseId, skillId, dispositions: dispositions.length });
   } catch (e) {
     console.warn('[agentClient] beginDigitalWrapUp: failed to load options:', e);
   }
-  useDigitalStore.getState().patchContact(caseId, { wrapup: true, dispositions, tags });
+  useDigitalStore.getState().patchContact(caseId, { wrapup: true, dispositions });
 }
 
-/** Save the disposition (+ optional comment) and tags for a digital contact. */
+/** Save the disposition (+ optional comment) for a digital contact. */
 export async function saveDigitalOutcome(
   caseId: string,
   dispositionId: number | null,
   notes: string,
-  tagIds: number[],
 ): Promise<void> {
-  const svc = digitalDispositionService();
-  if (dispositionId != null) {
-    const details = {
-      primaryDispositionId: dispositionId,
-      primaryDispositionNotes: notes,
-    } as CXoneDispositionDetails;
-    await svc.saveDisposition(caseId, details);
-  }
-  if (tagIds.length) {
-    const all = rawDigitalTags.get(caseId) ?? [];
-    const selected = all.filter((t) => tagIds.includes(t.tagId));
-    if (selected.length) await svc.saveTags(caseId, selected);
-  }
+  if (dispositionId == null) return;
+  const details = {
+    primaryDispositionId: dispositionId,
+    primaryDispositionNotes: notes,
+  } as CXoneDispositionDetails;
+  await digitalDispositionService().saveDisposition(caseId, details);
 }
 
 /** Finish wrap-up: resolve/close the digital contact and clear it from the UI. */

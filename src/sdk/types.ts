@@ -50,8 +50,6 @@ export interface DigitalContactView {
   wrapup?: boolean;
   /** Disposition options for this contact, loaded when wrap-up begins. */
   dispositions?: DispositionOption[];
-  /** Tag options for this contact, loaded when wrap-up begins. */
-  tags?: TagOption[];
 }
 
 /** A single customer interaction (call, chat, email, etc.). */

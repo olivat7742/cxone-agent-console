@@ -14,7 +14,6 @@ import {
   FormControl,
   InputLabel,
   MenuItem,
-  OutlinedInput,
   Paper,
   Select,
   Stack,
@@ -184,10 +183,8 @@ export function DigitalPanel() {
  */
 function DigitalWrapUp({ contact }: { contact: DigitalContactView }) {
   const dispositions = contact.dispositions ?? [];
-  const tags = contact.tags ?? [];
 
   const [dispositionId, setDispositionId] = useState<string>('');
-  const [tagIds, setTagIds] = useState<number[]>([]);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -200,12 +197,11 @@ function DigitalWrapUp({ contact }: { contact: DigitalContactView }) {
         contact.caseId,
         dispositionId === '' ? null : Number(dispositionId),
         notes,
-        tagIds,
       );
       await completeDigitalWrapUp(contact.caseId);
       // Contact is removed from the store on completion; no further state needed.
     } catch (e) {
-      setResult({ ok: false, msg: e instanceof Error ? e.message : 'Save failed' });
+      setResult({ ok: false, msg: e instanceof Error ? e.message : String(e) || 'Save failed' });
       setBusy(false);
     }
   }
@@ -231,37 +227,6 @@ function DigitalWrapUp({ contact }: { contact: DigitalContactView }) {
             {dispositions.map((d) => (
               <MenuItem key={d.id} value={String(d.id)}>
                 {d.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <FormControl fullWidth size="small">
-          <InputLabel id="digital-tags-label">Tags</InputLabel>
-          <Select
-            labelId="digital-tags-label"
-            multiple
-            value={tagIds}
-            onChange={(e) =>
-              setTagIds(
-                typeof e.target.value === 'string'
-                  ? e.target.value.split(',').map(Number)
-                  : (e.target.value as number[]),
-              )
-            }
-            input={<OutlinedInput label="Tags" />}
-            renderValue={(selected) => (
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {(selected as number[]).map((id) => {
-                  const t = tags.find((x) => x.id === id);
-                  return <Chip key={id} size="small" label={t ? t.name : id} variant="outlined" />;
-                })}
-              </Box>
-            )}
-          >
-            {tags.map((t) => (
-              <MenuItem key={t.id} value={t.id}>
-                {t.name}
               </MenuItem>
             ))}
           </Select>
