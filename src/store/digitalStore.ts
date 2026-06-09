@@ -23,10 +23,16 @@ export const useDigitalStore = create<DigitalStore>((set) => ({
 
   upsertContact: (contact) =>
     set((s) => {
-      const exists = s.contacts.some((c) => c.caseId === contact.caseId);
-      const contacts = exists
-        ? s.contacts.map((c) => (c.caseId === contact.caseId ? { ...c, ...contact } : c))
-        : [...s.contacts, contact];
+      const existing = s.contacts.find((c) => c.caseId === contact.caseId);
+      // Digital contact events are often "bare" (no messages). Don't let an empty
+      // messages array from such an event wipe a thread we already fetched.
+      const incoming =
+        existing && (!contact.messages || contact.messages.length === 0)
+          ? { ...contact, messages: existing.messages }
+          : contact;
+      const contacts = existing
+        ? s.contacts.map((c) => (c.caseId === contact.caseId ? { ...c, ...incoming } : c))
+        : [...s.contacts, incoming];
       // Auto-select the first contact if none selected.
       const selectedCaseId = s.selectedCaseId ?? contact.caseId;
       return { contacts, selectedCaseId };

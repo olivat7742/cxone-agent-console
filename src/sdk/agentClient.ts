@@ -64,6 +64,13 @@ let rawTags: CXoneTag[] = [];
 // Live digital contact instances, kept so we can changeStatus() on them.
 const liveDigital = new Map<string, CXoneDigitalContact>();
 let digitalSubscribed = false;
+// Last applied message signature per case, so polling only updates the store
+// when the thread actually changed (avoids needless re-renders).
+const lastDigitalSig = new Map<string, string>();
+// Poll timer that keeps open digital threads fresh. The SDK's new-message push
+// is unreliable here, so we poll the DFO detail for open conversations.
+let digitalPollTimer: ReturnType<typeof setInterval> | null = null;
+const DIGITAL_POLL_MS = 3500;
 
 // --- Mapping helpers --------------------------------------------------------
 
@@ -356,17 +363,40 @@ function subscribeDigitalEvents(): void {
     liveDigital.set(view.caseId, c);
     useDigitalStore.getState().upsertContact(view);
     void refreshDigitalMessages(view.caseId);
+    ensureDigitalPolling();
   });
 
-  // A new message on a case -> refresh that case's thread from the DFO detail
-  // (the bare live contact instance does not carry the messages).
+  // A new message on a case -> fast-path refresh. The event id mapping is not
+  // reliable, so refresh all open threads; the poll below is the safety net.
   dm.onDigitalContactNewMessageEvent.subscribe((evt: unknown) => {
-    const e = evt as { caseId?: string; contactId?: string };
-    const caseId = e?.caseId || e?.contactId;
-    debugLog('[CXone] digitalNewMessage', caseId);
-    if (!caseId) return;
-    void refreshDigitalMessages(String(caseId));
+    debugLog('[CXone] digitalNewMessage', evt);
+    refreshAllOpenDigital();
   });
+}
+
+/** Refresh the message thread for every open digital conversation. */
+function refreshAllOpenDigital(): void {
+  for (const c of useDigitalStore.getState().contacts) void refreshDigitalMessages(c.caseId);
+}
+
+/** Start polling open digital threads (idempotent). Stops itself when none remain. */
+function ensureDigitalPolling(): void {
+  if (digitalPollTimer) return;
+  digitalPollTimer = setInterval(() => {
+    if (useDigitalStore.getState().contacts.length === 0) {
+      stopDigitalPolling();
+      return;
+    }
+    refreshAllOpenDigital();
+  }, DIGITAL_POLL_MS);
+}
+
+/** Stop the digital polling timer. */
+function stopDigitalPolling(): void {
+  if (digitalPollTimer) {
+    clearInterval(digitalPollTimer);
+    digitalPollTimer = null;
+  }
 }
 
 /**
@@ -398,11 +428,16 @@ async function fetchDigitalDetail(caseId: string): Promise<DigitalDetail | null>
   }
 }
 
-/** Refresh a case's message thread in the store from the DFO detail. */
+/** Refresh a case's message thread in the store from the DFO detail. Only writes
+ *  to the store when the thread actually changed, to avoid needless re-renders. */
 async function refreshDigitalMessages(caseId: string): Promise<void> {
   const detail = await fetchDigitalDetail(caseId);
   if (!detail) return;
-  useDigitalStore.getState().setMessages(caseId, mapDigitalMessages(detail.messages));
+  const msgs = mapDigitalMessages(detail.messages);
+  const sig = `${msgs.length}:${msgs.map((m) => m.id).join('|')}`;
+  if (lastDigitalSig.get(caseId) === sig) return;
+  lastDigitalSig.set(caseId, sig);
+  useDigitalStore.getState().setMessages(caseId, msgs);
 }
 
 /** Initialize digital engagement and subscribe to digital events. Never throws. */
@@ -448,7 +483,9 @@ export async function resolveDigitalContact(caseId: string): Promise<void> {
   if (!contact) return;
   await (contact as unknown as { changeStatus: (s: string) => Promise<unknown> }).changeStatus('resolved');
   liveDigital.delete(caseId);
+  lastDigitalSig.delete(caseId);
   useDigitalStore.getState().removeContact(caseId);
+  if (useDigitalStore.getState().contacts.length === 0) stopDigitalPolling();
 }
 
 /**
