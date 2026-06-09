@@ -80,7 +80,9 @@ export function logout(): void {
   } catch {
     // ignore storage errors
   }
-  window.location.assign('/');
+  // Back to the app root. import.meta.env.BASE_URL respects the Vite `base`, so
+  // this works both locally ('/') and under the GitHub Pages subpath.
+  window.location.assign(import.meta.env.BASE_URL);
 }
 
 /** Best-effort display name from the logged-in user's details. */

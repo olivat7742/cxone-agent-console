@@ -16,6 +16,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+# .env.production holds only non-secret public-client config (see the file header)
+# and is committed on purpose so the GitHub Pages build is reproducible.
+!.env.production
 
 # Editor directories and files
 .vscode/*

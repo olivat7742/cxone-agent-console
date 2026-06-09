@@ -8,6 +8,9 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills'
 // browser does not provide. nodePolyfills shims them so the SDK works at
 // runtime. Without this, login can fail with "Buffer is not defined".
 export default defineConfig({
+  // Served from a GitHub Pages project subpath (https://<user>.github.io/cxone-agent-console/).
+  // Without this, asset and script URLs resolve at the domain root and 404.
+  base: '/cxone-agent-console/',
   plugins: [
     react(),
     nodePolyfills({

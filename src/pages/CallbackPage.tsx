@@ -38,7 +38,8 @@ export function CallbackPage() {
         setAgentName(agentName);
         setConnected(true);
         // Remove the ?code= from the URL so a refresh does not re-run it.
-        window.history.replaceState({}, '', '/');
+        // BASE_URL respects the Vite `base` (app root locally and on Pages).
+        window.history.replaceState({}, '', import.meta.env.BASE_URL);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Login failed'));
   }, [setConnected, setAgentName]);
@@ -61,7 +62,7 @@ export function CallbackPage() {
           <Typography variant="body2" color="text.secondary">
             {error}
           </Typography>
-          <Button variant="contained" onClick={() => window.location.assign('/')}>
+          <Button variant="contained" onClick={() => window.location.assign(import.meta.env.BASE_URL)}>
             Back to login
           </Button>
         </Stack>
