@@ -479,15 +479,9 @@ export async function sendDigitalReply(caseId: string, text: string): Promise<vo
   void refreshDigitalMessages(caseId);
 }
 
-/** Resolve / close a digital contact. */
+/** Resolve a digital contact (shortcut for completing wrap-up as 'resolved'). */
 export async function resolveDigitalContact(caseId: string): Promise<void> {
-  const contact = liveDigital.get(caseId);
-  if (!contact) return;
-  await (contact as unknown as { changeStatus: (s: string) => Promise<unknown> }).changeStatus('resolved');
-  liveDigital.delete(caseId);
-  lastDigitalSig.delete(caseId);
-  useDigitalStore.getState().removeContact(caseId);
-  if (useDigitalStore.getState().contacts.length === 0) stopDigitalPolling();
+  await completeDigitalWrapUp(caseId, 'resolved');
 }
 
 // --- Digital wrap-up (ACW) --------------------------------------------------
@@ -538,9 +532,19 @@ export async function saveDigitalOutcome(
   await digitalDispositionService().saveDisposition(caseId, details);
 }
 
-/** Finish wrap-up: resolve/close the digital contact and clear it from the UI. */
-export async function completeDigitalWrapUp(caseId: string): Promise<void> {
-  await resolveDigitalContact(caseId);
+/**
+ * Finish wrap-up: set the chosen case status (e.g. 'resolved', 'closed') and
+ * clear the contact from the UI. Defaults to 'resolved'.
+ */
+export async function completeDigitalWrapUp(caseId: string, status: string = 'resolved'): Promise<void> {
+  const contact = liveDigital.get(caseId);
+  if (contact) {
+    await (contact as unknown as { changeStatus: (s: string) => Promise<unknown> }).changeStatus(status);
+  }
+  liveDigital.delete(caseId);
+  lastDigitalSig.delete(caseId);
+  useDigitalStore.getState().removeContact(caseId);
+  if (useDigitalStore.getState().contacts.length === 0) stopDigitalPolling();
 }
 
 /**

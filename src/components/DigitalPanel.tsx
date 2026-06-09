@@ -181,10 +181,20 @@ export function DigitalPanel() {
  * conversation. Mirrors the voice OutcomePanel: disposition, tags, notes, then
  * Save & complete which saves the outcome and closes the case.
  */
+// Agent-selectable end states for a digital case (from the SDK's
+// DigitalContactStatus enum). 'resolved' is the default, matching prior behavior.
+const WRAPUP_STATUSES: { value: string; label: string }[] = [
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'closed', label: 'Closed' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'escalated', label: 'Escalated' },
+];
+
 function DigitalWrapUp({ contact }: { contact: DigitalContactView }) {
   const dispositions = contact.dispositions ?? [];
 
   const [dispositionId, setDispositionId] = useState<string>('');
+  const [status, setStatus] = useState<string>('resolved');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -198,7 +208,7 @@ function DigitalWrapUp({ contact }: { contact: DigitalContactView }) {
         dispositionId === '' ? null : Number(dispositionId),
         notes,
       );
-      await completeDigitalWrapUp(contact.caseId);
+      await completeDigitalWrapUp(contact.caseId, status);
       // Contact is removed from the store on completion; no further state needed.
     } catch (e) {
       setResult({ ok: false, msg: e instanceof Error ? e.message : String(e) || 'Save failed' });
@@ -227,6 +237,22 @@ function DigitalWrapUp({ contact }: { contact: DigitalContactView }) {
             {dispositions.map((d) => (
               <MenuItem key={d.id} value={String(d.id)}>
                 {d.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl fullWidth size="small">
+          <InputLabel id="digital-status-label">Status</InputLabel>
+          <Select
+            labelId="digital-status-label"
+            label="Status"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            {WRAPUP_STATUSES.map((s) => (
+              <MenuItem key={s.value} value={s.value}>
+                {s.label}
               </MenuItem>
             ))}
           </Select>
