@@ -103,7 +103,19 @@ function subscribeToAcdEvents(): void {
       reason: event?.currentState?.reason,
     });
     const name = mapAgentState(event);
-    if (name) useAgentStore.getState().setState(name);
+    if (name) {
+      useAgentStore.getState().setState(name);
+      // When the agent returns to Available, ACW is over: clear any lingering
+      // wrap-up contact (saved or timed out) so the outcome panel disappears.
+      if (name === 'Available') {
+        const contactStore = useContactStore.getState();
+        const wrapups = contactStore.contacts.filter((c) => c.status === 'wrapup');
+        if (wrapups.length) {
+          wrapups.forEach((c) => contactStore.removeContact(c.id));
+          useOutcomeStore.getState().clear();
+        }
+      }
+    }
   });
 
   // Voice contact lifecycle -> contact store.
@@ -125,9 +137,12 @@ function subscribeToAcdEvents(): void {
     const mapped = mapVoiceContact(c);
     const store = useContactStore.getState();
     if (mapped.status === 'ended') {
-      if (mapped.allowDispositions) {
-        // Call disconnected but dispositions are allowed: keep it in wrap-up
-        // (ACW) so the agent can disposition before it leaves the console.
+      const alreadySaved = useOutcomeStore.getState().savedContactIds.includes(mapped.id);
+      if (mapped.allowDispositions && !alreadySaved) {
+        // Call disconnected but dispositions are allowed and not yet saved:
+        // keep it in wrap-up (ACW) so the agent can disposition. The SDK
+        // re-publishes 'Disconnected' repeatedly during ACW, so once saved we
+        // must stop re-adding it (handled by the alreadySaved guard).
         store.upsertContact({ ...mapped, status: 'wrapup' });
       } else {
         store.removeContact(mapped.id);
