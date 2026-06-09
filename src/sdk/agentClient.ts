@@ -357,6 +357,9 @@ export async function saveOutcome(
     const selected = rawTags.filter((t) => tagIds.includes(t.tagId));
     if (selected.length) await svc.saveTags(contactId, selected);
   }
+  // Remember this contact is dispositioned so we never offer (and fail) a
+  // second save during wrap-up.
+  useOutcomeStore.getState().markSaved(contactId);
 }
 
 /** Complete wrap-up: remove the contact from the console and clear outcome options. */

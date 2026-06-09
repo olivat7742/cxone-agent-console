@@ -28,6 +28,7 @@ import { useOutcomeStore } from '../store/outcomeStore';
 export function OutcomePanel({ contact }: { contact: Contact }) {
   const dispositions = useOutcomeStore((s) => s.dispositions);
   const tags = useOutcomeStore((s) => s.tags);
+  const alreadySaved = useOutcomeStore((s) => s.savedContactIds.includes(contact.id));
 
   const [dispositionId, setDispositionId] = useState<string>('');
   const [tagIds, setTagIds] = useState<number[]>([]);
@@ -60,6 +61,27 @@ export function OutcomePanel({ contact }: { contact: Contact }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Already dispositioned (e.g. saved during the call). Don't offer the form
+  // again, a second save fails. Just let the agent finish wrap-up.
+  if (alreadySaved) {
+    return (
+      <Box>
+        <Typography variant="subtitle1" gutterBottom>
+          {isWrapUp ? 'Wrap-up' : 'Outcome'}
+        </Typography>
+        <Divider sx={{ mb: 1.5 }} />
+        <Stack spacing={2}>
+          <Alert severity="success">Outcome already saved for this contact.</Alert>
+          {isWrapUp && (
+            <Button variant="contained" onClick={() => completeWrapUp(contact.id)}>
+              Complete wrap-up
+            </Button>
+          )}
+        </Stack>
+      </Box>
+    );
   }
 
   return (
