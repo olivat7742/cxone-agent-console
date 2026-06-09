@@ -392,19 +392,51 @@ export async function initDigital(): Promise<void> {
   }
 }
 
+/**
+ * Resolve the channel id needed to reply. The enriched contact normally exposes
+ * it as channel.id, but on some digital events that value arrives late or empty.
+ * The contact also carries a replyChannels[] array whose channelId is, per the
+ * SDK types, the "channel id from contact response", so we fall back to it.
+ */
+function resolveDigitalChannelId(contact: CXoneDigitalContact): string | undefined {
+  const c = contact as unknown as {
+    channel?: { id?: string };
+    replyChannels?: Array<{ id?: string; channelId?: string }>;
+  };
+  return (
+    c.channel?.id ||
+    c.replyChannels?.find((rc) => rc.channelId)?.channelId ||
+    c.replyChannels?.find((rc) => rc.id)?.id ||
+    undefined
+  );
+}
+
 /** Send a reply on a digital contact. */
 export async function sendDigitalReply(caseId: string, text: string): Promise<void> {
   const contact = liveDigital.get(caseId);
   if (!contact) return;
-  const c = contact as unknown as {
+  const channelId = resolveDigitalChannelId(contact);
+  // TEMP DIAGNOSTIC (safe: channel config only, no customer message content).
+  // Remove once digital reply is confirmed working on the hosted site.
+  const dbg = contact as unknown as {
     channel?: { id?: string };
+    replyChannels?: unknown;
     case?: { threadIdOnExternalPlatform?: string };
-    reply: (req: CXoneDigitalReplyRequest, channelId: string, traceId: string) => Promise<unknown>;
   };
-  const channelId = c.channel?.id;
+  console.info('[CXone] digital reply attempt', {
+    caseId,
+    resolvedChannelId: channelId,
+    channelDotId: dbg.channel?.id,
+    replyChannels: dbg.replyChannels,
+    hasThread: Boolean(dbg.case?.threadIdOnExternalPlatform),
+  });
   if (!channelId) {
     throw new Error('Conversation is still loading; try again in a moment.');
   }
+  const c = contact as unknown as {
+    case?: { threadIdOnExternalPlatform?: string };
+    reply: (req: CXoneDigitalReplyRequest, channelId: string, traceId: string) => Promise<unknown>;
+  };
   // messageContent shape per the SDK: { type: 'TEXT', payload: { text } }.
   const request = {
     messageContent: { type: 'TEXT', payload: { text } },
