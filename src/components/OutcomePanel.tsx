@@ -38,7 +38,11 @@ export function OutcomePanel({ contact }: { contact: Contact }) {
 
   const isWrapUp = contact.status === 'wrapup';
   const needsDisposition = Boolean(contact.requiresDisposition);
-  const canSave = !busy && (!needsDisposition || dispositionId !== '');
+  // The platform only accepts a disposition during wrap-up (ACW): saving while
+  // the call is active returns 409, and after ACW closes returns 404. So Save
+  // is enabled only in the wrap-up window. The agent can pre-select fields
+  // during the call; submission happens once the call ends.
+  const canSave = !busy && isWrapUp && (!needsDisposition || dispositionId !== '');
 
   async function handleSave() {
     setBusy(true);
@@ -154,8 +158,15 @@ export function OutcomePanel({ contact }: { contact: Contact }) {
 
         {result && <Alert severity={result.ok ? 'success' : 'error'}>{result.msg}</Alert>}
 
+        {!isWrapUp && (
+          <Typography variant="caption" color="text.secondary">
+            You can prepare the outcome now. Submit becomes available when the
+            call ends (wrap-up).
+          </Typography>
+        )}
+
         <Button variant="contained" onClick={handleSave} disabled={!canSave}>
-          {busy ? 'Saving...' : isWrapUp ? 'Save & complete' : 'Save outcome'}
+          {busy ? 'Saving...' : 'Save & complete'}
         </Button>
       </Stack>
     </Box>
